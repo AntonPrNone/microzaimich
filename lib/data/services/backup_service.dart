@@ -13,7 +13,6 @@ class BackupService {
   Future<String> exportBackupJson() async {
     final users = await _readCollection(_firestoreService.users);
     final loans = await _readCollection(_firestoreService.loans);
-    final paymentRequests = await _readCollection(_firestoreService.paymentRequests);
     final notifications = await _readCollection(_firestoreService.notifications);
     final appSettings = await _readCollection(
       _firestoreService.appSettings,
@@ -29,7 +28,6 @@ class BackupService {
       'collections': {
         'users': users,
         'loans': loans,
-        'payment_requests': paymentRequests,
         'notifications': notifications,
         'app_settings': appSettings,
       },
@@ -58,10 +56,6 @@ class BackupService {
       _parseDocuments(collections['loans']),
     );
     await _replaceCollection(
-      _firestoreService.paymentRequests,
-      _parseDocuments(collections['payment_requests']),
-    );
-    await _replaceCollection(
       _firestoreService.notifications,
       _parseDocuments(collections['notifications']),
     );
@@ -75,7 +69,6 @@ class BackupService {
 
   Future<void> clearAllPreservingAdmin(String adminUserId) async {
     await _clearCollection(_firestoreService.loans);
-    await _clearCollection(_firestoreService.paymentRequests);
     await _clearCollection(_firestoreService.notifications);
     await _clearCollection(_firestoreService.appSettings);
 

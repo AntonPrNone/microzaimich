@@ -100,10 +100,10 @@ void main() {
       expect(requestDocs.docs, hasLength(1));
       final request = PaymentRequest.fromDoc(requestDocs.docs.single);
       expect(request.type, PaymentRequestType.nextInstallment);
-      expect(request.principalAmount, 500);
-      expect(request.interestAmount, 47.37);
+      expect(request.principalAmount, 499.35);
+      expect(request.interestAmount, 2.48);
       expect(request.penaltyAmount, 60);
-      expect(request.requestedAmount, 607.37);
+      expect(request.requestedAmount, 561.84);
 
       final adminNotifications = await firestore
           .collection('notifications')
@@ -165,7 +165,7 @@ void main() {
       final firstItem = updatedLoan.orderedSchedule.first;
       expect(firstItem.isPaid, isTrue);
       expect(firstItem.penaltyAccrued, 60);
-      expect(firstItem.interestAccruedPaid, 47.37);
+      expect(firstItem.interestAccruedPaid, 2.48);
 
       final updatedRequestDoc = await firestore
           .collection('payment_requests')
@@ -192,7 +192,7 @@ void main() {
             isPaid: true,
             penaltyAccrued: 20,
             principalAmount: 500,
-            interestAccruedPaid: 31.58,
+            interestAccruedPaid: 2.48,
             paidAt: DateTime.utc(2026, 4, 11),
           ),
           PaymentScheduleItem(

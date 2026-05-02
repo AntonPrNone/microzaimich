@@ -6,7 +6,6 @@ import '../data/repositories/auth_repository.dart';
 import '../data/repositories/app_settings_repository.dart';
 import '../data/repositories/loan_repository.dart';
 import '../data/repositories/notification_repository.dart';
-import '../data/repositories/payment_request_repository.dart';
 import '../data/services/backup_service.dart';
 import '../data/services/app_clock.dart';
 import '../data/services/bootstrap_service.dart';
@@ -43,14 +42,6 @@ class MicrozaimichApp extends StatelessWidget {
         ProxyProvider2<FirestoreService, NotificationRepository, LoanRepository>(
           update: (context, firestore, notifications, previous) =>
               LoanRepository(
-            firestoreService: firestore,
-            notificationRepository: notifications,
-          ),
-        ),
-        ProxyProvider2<FirestoreService, NotificationRepository,
-            PaymentRequestRepository>(
-          update: (context, firestore, notifications, previous) =>
-              PaymentRequestRepository(
             firestoreService: firestore,
             notificationRepository: notifications,
           ),

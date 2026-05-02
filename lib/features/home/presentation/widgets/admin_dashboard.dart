@@ -14,18 +14,12 @@ import '../../../../core/utils/validators.dart';
 import '../../../../data/models/app_user.dart';
 import '../../../../data/models/loan.dart';
 import '../../../../data/models/loan_defaults_settings.dart';
-import '../../../../data/models/payment_request.dart';
 import '../../../../data/models/payment_schedule_item.dart';
 import '../../../../data/models/payment_settings.dart';
 import '../../../../data/services/app_clock.dart';
 
 enum _ClientQuickFilter {
   overdue('С просрочкой', Icons.warning_amber_rounded, Color(0xFFFFC26B)),
-  pending(
-    'Ожидают подтверждения',
-    Icons.schedule_send_rounded,
-    Color(0xFF8BC4FF),
-  ),
   active('Активные', Icons.bolt_rounded, Color(0xFF71E6C1)),
   closed('Закрытые', Icons.check_circle_rounded, Color(0xFF8BC4FF));
 
@@ -42,7 +36,6 @@ class AdminClientsTab extends StatefulWidget {
     required this.currentViewerId,
     required this.clients,
     required this.loans,
-    required this.paymentRequests,
     required this.hideClosedLoans,
     required this.onEditLoan,
   });
@@ -50,7 +43,6 @@ class AdminClientsTab extends StatefulWidget {
   final String currentViewerId;
   final List<AppUser> clients;
   final List<Loan> loans;
-  final List<PaymentRequest> paymentRequests;
   final bool hideClosedLoans;
   final Future<void> Function(Loan loan) onEditLoan;
 
@@ -311,10 +303,6 @@ class _AdminClientsTabState extends State<AdminClientsTab> {
       final hasOverdueLoans = loans.any(
         (loan) => loan.status == 'active' && loan.penaltyOutstanding > 0,
       );
-      final hasPendingRequests = widget.paymentRequests.any(
-        (request) =>
-            request.userId == client.id && request.status == PaymentRequestStatus.pending,
-      );
       final activeLoans = loans.where((loan) => loan.status == 'active').length;
       final closedLoans = loans.length - activeLoans;
       final nextDates =
@@ -335,7 +323,6 @@ class _AdminClientsTabState extends State<AdminClientsTab> {
           totalPenalty: totalPenalty,
           totalPaid: totalPaid,
           hasOverdueLoans: hasOverdueLoans,
-          hasPendingRequests: hasPendingRequests,
           activeLoans: activeLoans,
           closedLoans: closedLoans,
           nearestPaymentDate: nearestPaymentDate,
@@ -392,14 +379,7 @@ class _AdminClientsTabState extends State<AdminClientsTab> {
       final hasOverdue = loans.any(
         (loan) => loan.status == 'active' && loan.penaltyOutstanding > 0,
       );
-      final hasPending = widget.paymentRequests.any(
-        (request) =>
-            request.userId == client.id && request.status == PaymentRequestStatus.pending,
-      );
       if (_filters.contains(_ClientQuickFilter.overdue) && !hasOverdue) {
-        return false;
-      }
-      if (_filters.contains(_ClientQuickFilter.pending) && !hasPending) {
         return false;
       }
       if (_filters.contains(_ClientQuickFilter.active) && !hasActive) {
@@ -598,7 +578,6 @@ class _AdminClientCard extends StatelessWidget {
     required this.totalPenalty,
     required this.totalPaid,
     required this.hasOverdueLoans,
-    required this.hasPendingRequests,
     required this.activeLoans,
     required this.closedLoans,
     required this.nearestPaymentDate,
@@ -618,7 +597,6 @@ class _AdminClientCard extends StatelessWidget {
   final double totalPenalty;
   final double totalPaid;
   final bool hasOverdueLoans;
-  final bool hasPendingRequests;
   final int activeLoans;
   final int closedLoans;
   final DateTime? nearestPaymentDate;
@@ -675,13 +653,6 @@ class _AdminClientCard extends StatelessWidget {
                           ),
                           const SizedBox(height: 4),
                           Text(Formatters.phone(client.phone)),
-                          if (hasPendingRequests) ...[
-                            const SizedBox(height: 8),
-                            _TagChip(
-                              label: 'Ждёт подтверждения',
-                              color: Theme.of(context).colorScheme.secondary,
-                            ),
-                          ],
                           if (hasOverdueLoans) ...[
                             const SizedBox(height: 8),
                             Container(
@@ -1440,21 +1411,17 @@ class AdminDashboard extends StatefulWidget {
     super.key,
     required this.clients,
     required this.loans,
-    required this.paymentRequests,
     required this.paymentSettings,
     required this.loanDefaults,
     required this.onDeleteClients,
     required this.onCreateClient,
     required this.onIssueLoan,
     required this.onUpdateLoan,
-    required this.onApproveRequest,
-    required this.onRejectRequest,
     required this.onSavePaymentSettings,
   });
 
   final List<AppUser> clients;
   final List<Loan> loans;
-  final List<PaymentRequest> paymentRequests;
   final PaymentSettings paymentSettings;
   final LoanDefaultsSettings loanDefaults;
   final Future<void> Function(List<AppUser> clients) onDeleteClients;
@@ -1472,12 +1439,6 @@ class AdminDashboard extends StatefulWidget {
   })
   onIssueLoan;
   final Future<void> Function(Loan loan) onUpdateLoan;
-  final Future<void> Function({
-    required PaymentRequest request,
-    required Loan loan,
-  })
-  onApproveRequest;
-  final Future<void> Function(PaymentRequest request) onRejectRequest;
   final Future<void> Function(PaymentSettings settings) onSavePaymentSettings;
 
   @override
@@ -1767,15 +1728,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     });
   }
 
-  String _clientNameById(String userId) {
-    for (final client in widget.clients) {
-      if (client.id == userId) {
-        return client.name;
-      }
-    }
-    return 'Клиент';
-  }
-
   @override
   Widget build(BuildContext context) {
     final activeLoans = widget.loans
@@ -1785,7 +1737,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
     final totalPortfolio = widget.loans.fold<double>(
       0,
-      (portfolioSum, loan) => portfolioSum + loan.totalAmount,
+      (portfolioSum, loan) => portfolioSum + loan.plannedTotalAmount,
     );
     final activePortfolio = activeLoans.fold<double>(
       0,
@@ -1807,7 +1759,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
     final activePortfolioWithoutPenalty = activeLoans.fold<double>(
       0,
-      (portfolioSum, loan) => portfolioSum + (loan.totalAmount - loan.plannedPaidAmount),
+      (portfolioSum, loan) =>
+          portfolioSum + (loan.plannedTotalAmount - loan.plannedPaidAmount),
     );
     final receivedPortfolioWithoutPenalty = Formatters.centsUp(
       (totalPortfolio - activePortfolioWithoutPenalty).clamp(0, double.infinity),
@@ -1816,9 +1769,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
       0,
       (penaltySum, loan) => penaltySum + loan.penaltyOutstanding,
     );
-    final pendingRequests =
-        widget.paymentRequests.where((request) => request.isPending).toList()
-          ..sort((a, b) => b.requestedAt.compareTo(a.requestedAt));
     final totalPotentialProfit = widget.loans.fold<double>(
       0,
       (profitSum, loan) => profitSum + (
@@ -2054,172 +2004,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
             remainingEntries: remainingProfitEntries,
           ),
           actionHint: 'Открыть по клиентам',
-        ),
-        const SizedBox(height: 20),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Заявки на подтверждение оплаты',
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                    ),
-                    _TagChip(
-                      label: 'Ожидают ${pendingRequests.length}',
-                      color: pendingRequests.isEmpty
-                          ? Theme.of(context).colorScheme.primary
-                          : const Color(0xFFFFC26B),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                if (pendingRequests.isEmpty)
-                  const Text('Новых заявок пока нет')
-                else
-                  ...pendingRequests.map((request) {
-                    Loan? loan;
-                    for (final item in widget.loans) {
-                      if (item.id == request.loanId) {
-                        loan = item;
-                        break;
-                      }
-                    }
-                    final requestedItem = loan == null || request.scheduleItemId == null
-                        ? null
-                        : loan.orderedSchedule
-                              .where((item) => item.id == request.scheduleItemId)
-                              .firstOrNull;
-                    final principalForRequest =
-                        request.principalAmount ??
-                        (request.type == PaymentRequestType.fullClose
-                            ? loan?.principalOutstanding
-                            : requestedItem == null || loan == null
-                            ? null
-                            : loan.principalAmountForItem(requestedItem));
-                    final penaltyForRequest =
-                        request.penaltyAmount ??
-                        (request.type == PaymentRequestType.fullClose
-                            ? loan?.accrualSnapshot(
-                                at: request.requestedAt,
-                              ).penaltyOutstanding
-                            : requestedItem == null || loan == null
-                            ? null
-                            : loan.penaltyForItem(
-                                requestedItem,
-                                at: request.requestedAt,
-                              ));
-                    final interestForRequest =
-                        request.interestAmount ??
-                        (principalForRequest == null
-                            ? null
-                            : Formatters.centsUp(
-                                (request.requestedAmount -
-                                        principalForRequest -
-                                        (penaltyForRequest ?? 0))
-                                    .clamp(0, double.infinity),
-                              ));
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .surfaceContainerHighest
-                              .withValues(alpha: 0.35),
-                          borderRadius: BorderRadius.circular(22),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              _clientNameById(request.userId),
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                            const SizedBox(height: 6),
-                            Text(request.loanLabel),
-                            const SizedBox(height: 4),
-                            Text(
-                              request.type == PaymentRequestType.fullClose
-                                  ? 'Запрос на полное погашение'
-                                  : 'Запрос на оплату одного платежа',
-                            ),
-                            Text(
-                              request.type == PaymentRequestType.fullClose
-                                  ? 'К полному закрытию по заявке: ${Formatters.money(request.requestedAmount)}'
-                                  : 'К оплате по заявке: ${Formatters.money(request.requestedAmount)}',
-                            ),
-                            if (request.type == PaymentRequestType.nextInstallment &&
-                                principalForRequest != null &&
-                                interestForRequest != null &&
-                                penaltyForRequest != null) ...[
-                              Text(
-                                'Тело: ${Formatters.money(principalForRequest)}',
-                              ),
-                              Text(
-                                'Процент: ${Formatters.money(interestForRequest)}',
-                              ),
-                              Text(
-                                'Пеня: ${Formatters.money(penaltyForRequest)}',
-                              ),
-                            ],
-                            if (request.type == PaymentRequestType.fullClose &&
-                                principalForRequest != null &&
-                                interestForRequest != null &&
-                                penaltyForRequest != null) ...[
-                              Text(
-                                'Тело: ${Formatters.money(principalForRequest)}',
-                              ),
-                              Text(
-                                'Процент: ${Formatters.money(interestForRequest)}',
-                              ),
-                              Text(
-                                'Пеня: ${Formatters.money(penaltyForRequest)}',
-                              ),
-                            ],
-                            Text(
-                              'Создано: ${Formatters.dateTime(request.requestedAt)}',
-                            ),
-                            const SizedBox(height: 12),
-                            Wrap(
-                              spacing: 12,
-                              runSpacing: 12,
-                              children: [
-                                ElevatedButton.icon(
-                                  onPressed: loan == null
-                                      ? null
-                                      : () async {
-                                          await widget.onApproveRequest(
-                                            request: request,
-                                            loan: loan!,
-                                          );
-                                        },
-                                  icon: const Icon(Icons.task_alt_outlined),
-                                  label: const Text('Подтвердить'),
-                                ),
-                                OutlinedButton.icon(
-                                  onPressed: () async {
-                                    await widget.onRejectRequest(request);
-                                  },
-                                  icon: const Icon(Icons.close_rounded),
-                                  label: const Text('Отклонить'),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }),
-              ],
-            ),
-          ),
         ),
         const SizedBox(height: 20),
         Card(
@@ -2475,11 +2259,11 @@ class _LoanPreviewCard extends StatelessWidget {
                 label: 'Процент',
                 value: '${loan.interestPercent.toStringAsFixed(2)}%',
               ),
-              _PreviewRow(
-                label: 'К возврату по плану',
-                value: Formatters.money(loan.totalAmount),
-                emphasize: true,
-              ),
+                                _PreviewRow(
+                                  label: 'К возврату по плану',
+                                  value: Formatters.money(loan.plannedTotalAmount),
+                                  emphasize: true,
+                                ),
               _PreviewRow(
                 label: 'Процент за день',
                 value: Formatters.money(loan.dailyInterestAmount),
@@ -2731,18 +2515,23 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
 
   String? _selectedClientId;
   bool _isSyncing = false;
+  late final PageController _pageController;
   late List<_EditableScheduleRow> _scheduleRows;
   _PaymentIntervalUnit _intervalUnit = _PaymentIntervalUnit.months;
+  int _currentPage = 0;
+  bool _showDetailedSchedule = false;
 
   @override
   void initState() {
     super.initState();
+    _pageController = PageController();
     _scheduleRows = [];
     _setupInitialState();
   }
 
   @override
   void dispose() {
+    _pageController.dispose();
     _principalController.dispose();
     _percentController.dispose();
     _totalController.dispose();
@@ -2751,9 +2540,6 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
     _intervalCountController.dispose();
     _titleController.dispose();
     _noteController.dispose();
-    for (final row in _scheduleRows) {
-      row.dispose();
-    }
     super.dispose();
   }
 
@@ -2763,7 +2549,7 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
       _selectedClientId = loan.userId;
       _principalController.text = Formatters.decimalInput(loan.principal);
       _percentController.text = Formatters.decimalInput(loan.interestPercent);
-      _totalController.text = Formatters.decimalInput(loan.totalAmount);
+      _totalController.text = Formatters.decimalInput(loan.plannedTotalAmount);
       _dailyPenaltyController.text = Formatters.decimalInput(
         loan.dailyPenaltyAmount,
       );
@@ -2778,12 +2564,10 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
             (item) => _EditableScheduleRow.fromItem(
               item,
               initialAmount: loan.principalAmountForItem(item),
-              onChanged: () {
-                setState(_syncFromSchedule);
-              },
             ),
           )
           .toList();
+      _rebuildSchedule();
       return;
     }
 
@@ -2796,11 +2580,7 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
     _percentController.text = Formatters.decimalInput(
       widget.defaultSettings.interestPercent,
     );
-    final defaultTotal = Formatters.cents(
-      widget.defaultSettings.principal *
-          (1 + (widget.defaultSettings.interestPercent / 100)),
-    );
-    _totalController.text = Formatters.decimalInput(defaultTotal);
+    _totalController.text = Formatters.decimalInput(0);
     _dailyPenaltyController.text = Formatters.decimalInput(
       widget.defaultSettings.dailyPenaltyAmount,
     );
@@ -2876,42 +2656,13 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
     return nextMonth.subtract(const Duration(days: 1)).day;
   }
 
-  void _syncTotalFromPercent() {
+  void _refreshTotalText() {
     if (_isSyncing) {
       return;
     }
     _isSyncing = true;
-    final principal = Formatters.parseDecimal(_principalController.text);
-    final percent = Formatters.parseDecimal(_percentController.text);
-    final total = Formatters.cents(principal * (1 + percent / 100));
-    _totalController.text = Formatters.decimalInput(total);
+    _totalController.text = Formatters.decimalInput(_editorTotal);
     _isSyncing = false;
-  }
-
-  void _syncPercentFromTotal() {
-    if (_isSyncing) {
-      return;
-    }
-    _isSyncing = true;
-    final principal = Formatters.parseDecimal(_principalController.text);
-    final total = Formatters.parseDecimal(_totalController.text);
-    final percent = principal == 0
-        ? 0
-        : Formatters.cents(((total / principal) - 1) * 100);
-    _percentController.text = Formatters.decimalInput(percent);
-    _isSyncing = false;
-  }
-
-  void _syncFromSchedule() {
-    final principal = _scheduleRows.fold<double>(
-      0,
-      (scheduleSum, row) =>
-          scheduleSum + Formatters.parseDecimal(row.amountController.text),
-    );
-    _principalController.text = Formatters.decimalInput(
-      Formatters.cents(principal),
-    );
-    _syncTotalFromPercent();
   }
 
   String _defaultLoanTitle() {
@@ -2925,10 +2676,14 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
   double get _editorPrincipal =>
       Formatters.parseDecimal(_principalController.text);
 
-  double get _editorTotal => Formatters.parseDecimal(_totalController.text);
+  double get _editorPercent => Formatters.parseDecimal(_percentController.text);
 
-  double get _editorPlannedInterest =>
-      Formatters.cents((_editorTotal - _editorPrincipal).clamp(0, double.infinity));
+  double get _editorTotal {
+    final preview = _editorPlannedPreviewLoan;
+    return preview.plannedTotalAmount;
+  }
+
+  double get _editorPlannedInterest => _buildEditorPreviewLoan().plannedInterestAmount;
 
   int get _editorTermDays {
     if (_scheduleRows.isEmpty) {
@@ -2942,84 +2697,166 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
     return days <= 0 ? 1 : days;
   }
 
-  double get _editorDailyInterestAmount {
-    if (_editorPlannedInterest <= 0) {
-      return 0;
-    }
-    return Formatters.centsUp(_editorPlannedInterest / _editorTermDays);
+  Loan _buildEditorPreviewLoan({
+    List<_EditableScheduleRow>? rows,
+    bool plannedOnly = false,
+  }) {
+    final effectiveRows = rows ?? _scheduleRows;
+    final draftSchedule = effectiveRows
+        .map(
+          (row) => PaymentScheduleItem(
+            id: row.id,
+            dueDate: AppClock.fromMoscowWallClock(row.dueDate),
+            amount: 0,
+            principalAmount: Formatters.cents(row.amount),
+            isPaid: plannedOnly ? false : row.isPaid,
+            penaltyAccrued: plannedOnly ? 0 : row.penaltyAccrued,
+            interestAccruedPaid: plannedOnly ? 0 : row.interestAccruedPaid,
+            paidAt: plannedOnly ? null : row.paidAt,
+          ),
+        )
+        .toList();
+    final preview = Loan(
+      id: widget.existingLoan?.id ?? 'editor-preview',
+      userId: _selectedClientId ?? '',
+      title: _titleController.text.trim(),
+      principal: _editorPrincipal,
+      interestPercent: _editorPercent,
+      totalAmount: 0,
+      dailyPenaltyAmount: Formatters.parseDecimal(_dailyPenaltyController.text),
+      issuedAt: widget.existingLoan?.issuedAt ?? AppClock.nowForStorage(),
+      schedule: draftSchedule,
+      status: effectiveRows.every((item) => item.isPaid) ? 'closed' : 'active',
+      note: _noteController.text.trim().isEmpty ? null : _noteController.text.trim(),
+    );
+    final hydratedSchedule = preview.orderedSchedule
+        .map(
+          (item) => item.copyWith(
+            amount: preview.amountForItem(item),
+          ),
+        )
+        .toList();
+    final hydratedPreview = preview.copyWith(schedule: hydratedSchedule);
+    return hydratedPreview.copyWith(totalAmount: hydratedPreview.plannedTotalAmount);
   }
 
-  DateTime _dateOnly(DateTime value) => DateTime(value.year, value.month, value.day);
+  Loan get _editorPlannedPreviewLoan =>
+      _buildEditorPreviewLoan(plannedOnly: true);
 
-  String? get _scheduleChronologyError {
-    if (_scheduleRows.isEmpty) {
-      return null;
+  Future<void> _goToPage(int page) async {
+    if (!_pageController.hasClients) {
+      return;
     }
-
-    final issuedAtDate = _dateOnly(widget.existingLoan?.issuedAt ?? AppClock.now());
-    final firstDueDate = _dateOnly(_scheduleRows.first.dueDate);
-    if (firstDueDate.isBefore(issuedAtDate)) {
-      return 'Дата первого платежа не может быть раньше даты выдачи займа';
-    }
-
-    for (var index = 1; index < _scheduleRows.length; index++) {
-      final previousDate = _dateOnly(_scheduleRows[index - 1].dueDate);
-      final currentDate = _dateOnly(_scheduleRows[index].dueDate);
-      if (currentDate.isBefore(previousDate)) {
-        return 'Платёж ${index + 1} не может быть раньше платежа $index';
-      }
-    }
-
-    return null;
+    await _pageController.animateToPage(
+      page,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   void _generateSchedule() {
-    final principal = Formatters.parseDecimal(_principalController.text);
+    _rebuildSchedule();
+  }
+
+  void _handlePercentChanged() {
+    if (_isSyncing) {
+      return;
+    }
+    setState(() {
+      _rebuildSchedule();
+    });
+  }
+
+  void _rebuildSchedule() {
     final months = int.tryParse(_monthsController.text) ?? 1;
     final safeMonths = months <= 0 ? 1 : months;
+    final previousRows = List<_EditableScheduleRow>.from(_scheduleRows);
+    final nextRows = <_EditableScheduleRow>[];
 
-    for (final row in _scheduleRows) {
-      row.dispose();
-    }
-    _scheduleRows = [];
-
-    final equalPart = Formatters.cents(principal / safeMonths);
-    var accumulated = 0.0;
     final baseDate = widget.existingLoan?.issuedAt ?? AppClock.now();
 
     for (var index = 0; index < safeMonths; index++) {
-      final amount = index == safeMonths - 1
-          ? Formatters.cents(principal - accumulated)
-          : equalPart;
-      accumulated = Formatters.cents(accumulated + amount);
-      _scheduleRows.add(
+      final previous = index < previousRows.length ? previousRows[index] : null;
+      nextRows.add(
         _EditableScheduleRow(
-          id: 'row-$index-$baseDate.microsecondsSinceEpoch',
+          id: previous?.id ?? 'row-$index-$baseDate.microsecondsSinceEpoch',
           dueDate: _advanceByInterval(baseDate, index + 1),
-          amountController: TextEditingController(
-            text: Formatters.decimalInput(amount),
-          ),
-          onChanged: () => setState(_syncFromSchedule),
+          amount: previous?.amount ?? 0,
+          isPaid: previous?.isPaid ?? false,
+          penaltyAccrued: previous?.penaltyAccrued ?? 0,
+          interestAccruedPaid: previous?.interestAccruedPaid ?? 0,
+          paidAt: previous?.paidAt,
         ),
       );
     }
 
-    setState(() {});
+    _scheduleRows = nextRows;
+    final preview = _buildEditorPreviewLoan(plannedOnly: true);
+    _scheduleRows = _scheduleRows.map((row) {
+      final item = preview.orderedSchedule.firstWhere(
+        (scheduleItem) => scheduleItem.id == row.id,
+      );
+      row.amount = preview.principalAmountForItem(item);
+      return row;
+    }).toList();
+    _refreshTotalText();
   }
 
-  Future<void> _pickDate(_EditableScheduleRow row) async {
-    final selected = await showDatePicker(
+  void _setPaidFromIndex(int index, bool isPaid) {
+    _setPaidFromIndexWithDate(index, isPaid, paidAt: AppClock.now());
+  }
+
+  void _setPaidFromIndexWithDate(int index, bool isPaid, {required DateTime paidAt}) {
+    final paidAtStorage = AppClock.fromMoscowWallClock(paidAt);
+    for (var itemIndex = 0; itemIndex < _scheduleRows.length; itemIndex++) {
+      final row = _scheduleRows[itemIndex];
+      if (isPaid) {
+        if (itemIndex <= index) {
+          if (!row.isPaid) {
+            final previewLoan = _buildEditorPreviewLoan();
+            final item = previewLoan.orderedSchedule.firstWhere(
+              (scheduleItem) => scheduleItem.id == row.id,
+            );
+            row.interestAccruedPaid = previewLoan.interestForItem(item);
+            row.penaltyAccrued = previewLoan.penaltyForItem(item);
+          }
+          row.isPaid = true;
+          row.paidAt = paidAtStorage;
+        }
+        continue;
+      }
+
+      if (itemIndex >= index) {
+        row.isPaid = false;
+        row.paidAt = null;
+        row.interestAccruedPaid = 0;
+        row.penaltyAccrued = 0;
+      }
+    }
+  }
+
+  Future<void> _pickPaymentDate(int index, {required bool markPaid}) async {
+    final row = _scheduleRows[index];
+    final initialDate = markPaid
+        ? AppClock.now()
+        : (row.paidAt ?? AppClock.now());
+    final firstDate = widget.existingLoan?.issuedAt ?? AppClock.now();
+    final pickedDate = await showDatePicker(
       context: context,
-      initialDate: row.dueDate,
-      firstDate: DateTime(2020),
+      initialDate: initialDate,
+      firstDate: DateTime(firstDate.year, firstDate.month, firstDate.day),
       lastDate: DateTime(2100),
       locale: const Locale('ru', 'RU'),
     );
-    if (selected == null) {
+    if (pickedDate == null || !mounted) {
       return;
     }
     setState(() {
-      row.dueDate = selected;
+      if (markPaid) {
+        _setPaidFromIndexWithDate(index, true, paidAt: pickedDate);
+      } else {
+        _scheduleRows[index].paidAt = AppClock.fromMoscowWallClock(pickedDate);
+      }
     });
   }
 
@@ -3044,14 +2881,13 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
       );
       return;
     }
-    if (_scheduleChronologyError case final error?) {
-      messenger.showSnackBar(SnackBar(content: Text(error)));
-      return;
-    }
-
+    final previewLoan = _buildEditorPreviewLoan();
     final schedule = <PaymentScheduleItem>[];
     for (final row in _scheduleRows) {
-      final amount = Formatters.parseDecimal(row.amountController.text);
+      final previewItem = previewLoan.orderedSchedule.firstWhere(
+        (item) => item.id == row.id,
+      );
+      final amount = previewLoan.principalAmountForItem(previewItem);
       if (amount <= 0) {
         messenger.showSnackBar(
           const SnackBar(
@@ -3064,7 +2900,11 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
         PaymentScheduleItem(
           id: row.id,
           dueDate: AppClock.fromMoscowWallClock(row.dueDate),
-          amount: Formatters.cents(amount),
+          amount: row.isPaid
+              ? Formatters.centsUp(
+                  amount + row.interestAccruedPaid + row.penaltyAccrued,
+                )
+              : previewLoan.amountForItem(previewItem),
           principalAmount: Formatters.cents(amount),
           isPaid: row.isPaid,
           penaltyAccrued: row.penaltyAccrued,
@@ -3074,12 +2914,8 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
       );
     }
 
-    final total = Formatters.cents(
-      Formatters.parseDecimal(_totalController.text),
-    );
-    final percent = principal == 0
-        ? 0.0
-        : Formatters.cents(((total / principal) - 1) * 100);
+    final total = _editorTotal;
+    final percent = _editorPercent;
 
     if (widget.existingLoan == null) {
       await widget.onCreate(
@@ -3120,11 +2956,7 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final scheduleTotal = _scheduleRows.fold<double>(
-      0,
-      (scheduleSum, row) =>
-          scheduleSum + Formatters.parseDecimal(row.amountController.text),
-    );
+    final mediaQuery = MediaQuery.of(context);
 
     return SafeArea(
       child: Padding(
@@ -3132,373 +2964,350 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
           left: 20,
           right: 20,
           top: 12,
-          bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+          bottom: mediaQuery.viewInsets.bottom + 20,
         ),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                widget.existingLoan == null
-                    ? 'Новый займ'
-                    : 'Редактирование займа',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 16),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Основные условия',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _titleController,
-                        decoration: const InputDecoration(
-                          labelText: 'Наименование займа',
-                          prefixIcon: Icon(Icons.title_rounded),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        initialValue: _selectedClientId,
-                        decoration: const InputDecoration(
-                          labelText: 'Клиент',
-                          prefixIcon: Icon(Icons.badge_outlined),
-                        ),
-                        items: widget.clients
-                            .map(
-                              (client) => DropdownMenuItem(
-                                value: client.id,
-                                child: Text(
-                                  '${client.name} • ${Formatters.phone(client.phone)}',
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.existingLoan == null ? 'Новый займ' : 'Редактирование займа',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: PageView(
+                controller: _pageController,
+                onPageChanged: (page) => setState(() => _currentPage = page),
+                children: [
+                  SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Основные условия',
+                                  style: Theme.of(context).textTheme.titleMedium,
                                 ),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (value) =>
-                            setState(() => _selectedClientId = value),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _principalController,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        decoration: const InputDecoration(
-                          labelText: 'Сумма займа',
-                          prefixIcon: Icon(Icons.currency_ruble_outlined),
-                        ),
-                        onChanged: (_) => setState(_syncTotalFromPercent),
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _percentController,
-                              keyboardType:
-                                  const TextInputType.numberWithOptions(
-                                    decimal: true,
-                                  ),
-                              decoration: const InputDecoration(
-                                labelText: 'Процент',
-                                prefixIcon: Icon(Icons.percent_outlined),
-                              ),
-                              onChanged: (_) => setState(_syncTotalFromPercent),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextField(
-                              controller: _totalController,
-                              keyboardType:
-                                  const TextInputType.numberWithOptions(
-                                    decimal: true,
-                                  ),
-                              decoration: const InputDecoration(
-                                labelText: 'Сумма к возврату',
-                                prefixIcon: Icon(Icons.price_change_outlined),
-                              ),
-                              onChanged: (_) => setState(_syncPercentFromTotal),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _dailyPenaltyController,
-                              keyboardType:
-                                  const TextInputType.numberWithOptions(
-                                    decimal: true,
-                                  ),
-                              decoration: const InputDecoration(
-                                labelText: 'Пеня за день',
-                                prefixIcon: Icon(Icons.warning_amber_rounded),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextField(
-                              controller: _monthsController,
-                              keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(
-                                labelText: 'Платежей',
-                                prefixIcon: Icon(Icons.timeline_outlined),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _intervalCountController,
-                              keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(
-                                labelText: 'Каждые',
-                                prefixIcon: Icon(Icons.swap_horiz_rounded),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: DropdownButtonFormField<_PaymentIntervalUnit>(
-                              initialValue: _intervalUnit,
-                              items: _PaymentIntervalUnit.values
-                                  .map(
-                                    (unit) => DropdownMenuItem(
-                                      value: unit,
-                                      child: Text(unit.label),
-                                    ),
-                                  )
-                                  .toList(),
-                              onChanged: (value) {
-                                if (value == null) {
-                                  return;
-                                }
-                                setState(() {
-                                  _intervalUnit = value;
-                                });
-                              },
-                              decoration: const InputDecoration(
-                                labelText: 'Интервал',
-                                prefixIcon: Icon(Icons.date_range_outlined),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _noteController,
-                        minLines: 1,
-                        maxLines: 3,
-                        decoration: const InputDecoration(
-                          labelText: 'Комментарий',
-                          prefixIcon: Icon(Icons.sticky_note_2_outlined),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Сводка расчёта',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 12),
-                      _PreviewRow(
-                        label: 'Тело займа по графику',
-                        value: Formatters.money(scheduleTotal),
-                      ),
-                      _PreviewRow(
-                        label: 'Сумма к возврату по плану',
-                        value: Formatters.money(_editorTotal),
-                        emphasize: true,
-                      ),
-                      _PreviewRow(
-                        label: 'Плановая переплата',
-                        value: Formatters.money(_editorPlannedInterest),
-                      ),
-                      _PreviewRow(
-                        label: 'Процент за день',
-                        value: Formatters.money(_editorDailyInterestAmount),
-                      ),
-                      _PreviewRow(
-                        label: 'Пеня за день',
-                        value: Formatters.money(
-                          Formatters.parseDecimal(_dailyPenaltyController.text),
-                        ),
-                        valueColor: const Color(0xFFFFC26B),
-                      ),
-                      _PreviewRow(
-                        label: 'Срок в днях',
-                        value: '$_editorTermDays',
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: _generateSchedule,
-                          icon: const Icon(Icons.auto_fix_high_outlined),
-                          label: const Text('Пересчитать график'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'График платежей',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              if (_scheduleChronologyError case final error?) ...[
-                const SizedBox(height: 8),
-                Text(
-                  error,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: const Color(0xFFFF8A80),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 12),
-              ..._scheduleRows.asMap().entries.map((entry) {
-                final index = entry.key;
-                final row = entry.value;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Text(
-                                'Платёж ${index + 1}',
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                              const Spacer(),
-                              IconButton(
-                                onPressed: _scheduleRows.length == 1
-                                    ? null
-                                    : () {
-                                        setState(() {
-                                          final removed = _scheduleRows
-                                              .removeAt(index);
-                                          removed.dispose();
-                                          _syncFromSchedule();
-                                        });
-                                      },
-                                icon: const Icon(
-                                  Icons.delete_outline,
-                                  color: Color(0xFFFF8A80),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: () => _pickDate(row),
-                                  icon: const Icon(Icons.event_outlined),
-                                  label: Text(Formatters.date(row.dueDate)),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: TextField(
-                                  controller: row.amountController,
-                                  keyboardType:
-                                      const TextInputType.numberWithOptions(
-                                        decimal: true,
-                                      ),
+                                const SizedBox(height: 12),
+                                TextField(
+                                  controller: _titleController,
                                   decoration: const InputDecoration(
-                                    labelText: 'Сумма',
+                                    labelText: 'Наименование займа',
+                                    prefixIcon: Icon(Icons.title_rounded),
                                   ),
-                                  onChanged: (_) => row.onChanged(),
                                 ),
-                              ),
-                            ],
+                                const SizedBox(height: 12),
+                                DropdownButtonFormField<String>(
+                                  initialValue: _selectedClientId,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Клиент',
+                                    prefixIcon: Icon(Icons.badge_outlined),
+                                  ),
+                                  items: widget.clients
+                                      .map(
+                                        (client) => DropdownMenuItem(
+                                          value: client.id,
+                                          child: Text(
+                                            '${client.name} • ${Formatters.phone(client.phone)}',
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                  onChanged: (value) => setState(() => _selectedClientId = value),
+                                ),
+                                const SizedBox(height: 12),
+                                TextField(
+                                  controller: _principalController,
+                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                  decoration: const InputDecoration(
+                                    labelText: 'Сумма займа',
+                                    prefixIcon: Icon(Icons.currency_ruble_outlined),
+                                  ),
+                                  onChanged: (_) => setState(() {
+                                    _rebuildSchedule();
+                                  }),
+                                ),
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: TextField(
+                                        controller: _percentController,
+                                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                        decoration: const InputDecoration(
+                                          labelText: 'Процент',
+                                          prefixIcon: Icon(Icons.percent_outlined),
+                                        ),
+                                        onChanged: (_) => _handlePercentChanged(),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: TextField(
+                                        controller: _totalController,
+                                        readOnly: true,
+                                        decoration: const InputDecoration(
+                                          labelText: 'К возврату',
+                                          prefixIcon: Icon(Icons.price_change_outlined),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: TextField(
+                                        controller: _dailyPenaltyController,
+                                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                        decoration: const InputDecoration(
+                                          labelText: 'Пеня за день',
+                                          prefixIcon: Icon(Icons.warning_amber_rounded),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: TextField(
+                                        controller: _monthsController,
+                                        keyboardType: TextInputType.number,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Платежей',
+                                          prefixIcon: Icon(Icons.timeline_outlined),
+                                        ),
+                                        onChanged: (_) => setState(_rebuildSchedule),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: TextField(
+                                        controller: _intervalCountController,
+                                        keyboardType: TextInputType.number,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Каждые',
+                                          prefixIcon: Icon(Icons.swap_horiz_rounded),
+                                        ),
+                                        onChanged: (_) => setState(_rebuildSchedule),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: DropdownButtonFormField<_PaymentIntervalUnit>(
+                                        initialValue: _intervalUnit,
+                                        items: _PaymentIntervalUnit.values
+                                            .map(
+                                              (unit) => DropdownMenuItem(
+                                                value: unit,
+                                                child: Text(unit.label),
+                                              ),
+                                            )
+                                            .toList(),
+                                        onChanged: (value) {
+                                          if (value == null) {
+                                            return;
+                                          }
+                                          setState(() {
+                                            _intervalUnit = value;
+                                            _rebuildSchedule();
+                                          });
+                                        },
+                                        decoration: const InputDecoration(
+                                          labelText: 'Интервал',
+                                          prefixIcon: Icon(Icons.date_range_outlined),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                TextField(
+                                  controller: _noteController,
+                                  minLines: 1,
+                                  maxLines: 3,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Комментарий',
+                                    prefixIcon: Icon(Icons.sticky_note_2_outlined),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                          const SizedBox(height: 10),
-                          SwitchListTile(
-                            value: row.isPaid,
-                            contentPadding: EdgeInsets.zero,
-                            title: const Text('Платёж уже оплачен'),
-                            onChanged: (value) {
-                              setState(() {
-                                row.isPaid = value;
-                                row.paidAt = value
-                                    ? AppClock.nowForStorage()
-                                    : null;
-                              });
-                            },
+                        ),
+                        const SizedBox(height: 16),
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Сводка расчёта',
+                                  style: Theme.of(context).textTheme.titleMedium,
+                                ),
+                                const SizedBox(height: 12),
+                                _PreviewRow(
+                                  label: 'Плановая переплата',
+                                  value: Formatters.money(_editorPlannedInterest),
+                                ),
+                                _PreviewRow(label: 'Срок в днях', value: '$_editorTermDays'),
+                              ],
+                            ),
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
-                );
-              }),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: () {
-                  setState(() {
-                    final baseDate = _scheduleRows.isNotEmpty
-                        ? _scheduleRows.last.dueDate
-                        : (widget.existingLoan?.issuedAt ?? AppClock.now());
-                    _scheduleRows.add(
-                      _EditableScheduleRow(
-                        id: 'row-${AppClock.now().microsecondsSinceEpoch}',
-                        dueDate: _advanceByInterval(baseDate, 1),
-                        amountController: TextEditingController(text: '0,00'),
-                        onChanged: () => setState(_syncFromSchedule),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'График платежей',
+                                  style: Theme.of(context).textTheme.titleLarge,
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Сформирован автоматически по основным условиям',
+                                  style: Theme.of(context).textTheme.bodyMedium,
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                'Подробно',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                              Switch.adaptive(
+                                value: _showDetailedSchedule,
+                                onChanged: (value) => setState(
+                                  () => _showDetailedSchedule = value,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
-                    );
-                  });
-                },
-                icon: const Icon(Icons.add),
-                label: const Text('Добавить платёж'),
+                      const SizedBox(height: 16),
+                      Expanded(
+                        child: _scheduleRows.isEmpty
+                            ? Center(
+                                child: Text(
+                                  'График пока пуст',
+                                  style: Theme.of(context).textTheme.bodyMedium,
+                                ),
+                              )
+                            : ListView.separated(
+                                itemCount: _scheduleRows.length,
+                                separatorBuilder: (_, _) => const SizedBox(height: 12),
+                                itemBuilder: (context, index) {
+                                  final row = _scheduleRows[index];
+                                  return _EditorScheduleCard(
+                                    loan: _editorPlannedPreviewLoan,
+                                    row: row,
+                                    index: index,
+                                    showDetails: _showDetailedSchedule,
+                                    onChanged: (value) async {
+                                      if (value) {
+                                        await _pickPaymentDate(
+                                          index,
+                                          markPaid: true,
+                                        );
+                                        return;
+                                      }
+                                      setState(() {
+                                        _setPaidFromIndex(index, false);
+                                      });
+                                    },
+                                    onEditPaidDate: row.isPaid
+                                        ? () => _pickPaymentDate(
+                                            index,
+                                            markPaid: false,
+                                          )
+                                        : null,
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: _save,
-                  icon: const Icon(Icons.save_outlined),
-                  label: Text(
-                    widget.existingLoan == null
-                        ? 'Сохранить займ'
-                        : 'Сохранить изменения',
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                IconButton(
+                  onPressed: _currentPage == 0 ? null : () => _goToPage(0),
+                  icon: const Icon(Icons.chevron_left_rounded),
+                ),
+                Expanded(
+                  child: Column(
+                    children: [
+                      Text(
+                        '${_currentPage + 1} / 2',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: List.generate(2, (index) {
+                          final isActive = index == _currentPage;
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              width: isActive ? 22 : 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                color: isActive
+                                    ? Theme.of(context).colorScheme.secondary
+                                    : Theme.of(context).colorScheme.secondary.withValues(alpha: 0.28),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                            ),
+                          );
+                        }),
+                      ),
+                    ],
                   ),
                 ),
+                IconButton(
+                  onPressed: _currentPage == 1 ? null : () => _goToPage(1),
+                  icon: const Icon(Icons.chevron_right_rounded),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _save,
+                icon: const Icon(Icons.save_outlined),
+                label: Text(
+                  widget.existingLoan == null ? 'Сохранить займ' : 'Сохранить изменения',
+                ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -3509,8 +3318,7 @@ class _EditableScheduleRow {
   _EditableScheduleRow({
     required this.id,
     required this.dueDate,
-    required this.amountController,
-    required this.onChanged,
+    required this.amount,
     this.isPaid = false,
     this.penaltyAccrued = 0,
     this.interestAccruedPaid = 0,
@@ -3520,15 +3328,11 @@ class _EditableScheduleRow {
   factory _EditableScheduleRow.fromItem(
     PaymentScheduleItem item, {
     required double initialAmount,
-    required VoidCallback onChanged,
   }) {
     return _EditableScheduleRow(
       id: item.id,
       dueDate: item.dueDate,
-      amountController: TextEditingController(
-        text: Formatters.decimalInput(initialAmount),
-      ),
-      onChanged: onChanged,
+      amount: initialAmount,
       isPaid: item.isPaid,
       penaltyAccrued: item.penaltyAccrued,
       interestAccruedPaid: item.interestAccruedPaid,
@@ -3538,15 +3342,213 @@ class _EditableScheduleRow {
 
   final String id;
   DateTime dueDate;
-  final TextEditingController amountController;
-  final VoidCallback onChanged;
+  double amount;
   bool isPaid;
   double penaltyAccrued;
   double interestAccruedPaid;
   DateTime? paidAt;
+}
 
-  void dispose() {
-    amountController.dispose();
+class _EditorScheduleCard extends StatelessWidget {
+  const _EditorScheduleCard({
+    required this.loan,
+    required this.row,
+    required this.index,
+    required this.showDetails,
+    required this.onChanged,
+    required this.onEditPaidDate,
+  });
+
+  final Loan loan;
+  final _EditableScheduleRow row;
+  final int index;
+  final bool showDetails;
+  final Future<void> Function(bool value) onChanged;
+  final Future<void> Function()? onEditPaidDate;
+
+  @override
+  Widget build(BuildContext context) {
+    final item = loan.orderedSchedule.firstWhere((scheduleItem) => scheduleItem.id == row.id);
+    final accentColor = row.isPaid
+        ? Theme.of(context).colorScheme.primary
+        : Theme.of(context).colorScheme.secondary;
+    final principal = loan.principalAmountForItem(item);
+    final interest = loan.plannedInterestForItem(item);
+    final amountWithInterest = loan.plannedAmountForItem(item);
+    final statusLabel = row.isPaid ? 'Оплачен' : 'Ожидается';
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      child: Stack(
+        children: [
+          Positioned(
+            top: 0,
+            left: 0,
+            child: Container(
+              width: 40,
+              height: 30,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: accentColor.withValues(alpha: 0.14),
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(24),
+                  bottomRight: Radius.circular(16),
+                ),
+              ),
+              child: Text(
+                '${index + 1}',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: accentColor,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 20,
+                      backgroundColor: accentColor.withValues(alpha: 0.18),
+                      child: Icon(
+                        row.isPaid
+                            ? Icons.check_rounded
+                            : Icons.calendar_month_outlined,
+                        color: accentColor,
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      Formatters.money(amountWithInterest),
+                                      style: Theme.of(context).textTheme.titleMedium,
+                                    ),
+                                    if (showDetails) ...[
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        'Тело: ${Formatters.money(principal)}',
+                                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                          fontWeight: FontWeight.w700,
+                                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                              if (showDetails)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 9,
+                                    vertical: 5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: accentColor.withValues(alpha: 0.14),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.percent_rounded,
+                                        size: 14,
+                                        color: accentColor,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '+ ${Formatters.money(interest)}',
+                                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                          color: accentColor,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Срок: ${Formatters.date(row.dueDate)}',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: Theme.of(context).colorScheme.onSurface,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (row.isPaid && row.paidAt != null) ...[
+                            const SizedBox(height: 2),
+                            InkWell(
+                              onTap: onEditPaidDate,
+                              borderRadius: BorderRadius.circular(10),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    'Оплачен ${Formatters.date(row.paidAt!)}',
+                                    style: Theme.of(context).textTheme.bodySmall,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Icon(
+                                    Icons.edit_calendar_outlined,
+                                    size: 14,
+                                    color: accentColor,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 4),
+                          Text(
+                            statusLabel,
+                            style: TextStyle(
+                              color: accentColor,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Платёж уже оплачен',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ),
+                    Switch(
+                      value: row.isPaid,
+                      onChanged: (value) {
+                        onChanged(value);
+                      },
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

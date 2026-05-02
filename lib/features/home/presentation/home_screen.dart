@@ -14,7 +14,6 @@ import '../../../data/models/app_clock_settings.dart';
 import '../../../data/models/app_user.dart';
 import '../../../data/models/loan.dart';
 import '../../../data/models/loan_defaults_settings.dart';
-import '../../../data/models/payment_request.dart';
 import '../../../data/models/payment_schedule_item.dart';
 import '../../../data/models/payment_settings.dart';
 import '../../../data/models/user_role.dart';
@@ -22,7 +21,6 @@ import '../../../data/repositories/app_settings_repository.dart';
 import '../../../data/repositories/auth_repository.dart';
 import '../../../data/repositories/loan_repository.dart';
 import '../../../data/repositories/notification_repository.dart';
-import '../../../data/repositories/payment_request_repository.dart';
 import '../../../data/services/local_notification_service.dart';
 import '../../../data/services/app_clock.dart';
 import '../../../data/services/backup_service.dart';
@@ -38,7 +36,6 @@ class HomeScreen extends StatelessWidget {
     final currentUser = context.watch<LoginController>().currentUser!;
     final authRepository = context.read<AuthRepository>();
     final loanRepository = context.read<LoanRepository>();
-    final paymentRequestRepository = context.read<PaymentRequestRepository>();
     final appSettingsRepository = context.read<AppSettingsRepository>();
     final notificationRepository = context.read<NotificationRepository>();
     final backupService = context.read<BackupService>();
@@ -59,7 +56,6 @@ class HomeScreen extends StatelessWidget {
             currentUser: currentUser,
             authRepository: authRepository,
             loanRepository: loanRepository,
-            paymentRequestRepository: paymentRequestRepository,
             appSettingsRepository: appSettingsRepository,
             notificationRepository: notificationRepository,
             backupService: backupService,
@@ -70,7 +66,6 @@ class HomeScreen extends StatelessWidget {
         return _ClientHome(
           currentUser: currentUser,
           loanRepository: loanRepository,
-          paymentRequestRepository: paymentRequestRepository,
           appSettingsRepository: appSettingsRepository,
           notificationRepository: notificationRepository,
         );
@@ -83,14 +78,12 @@ class _ClientHome extends StatelessWidget {
   const _ClientHome({
     required this.currentUser,
     required this.loanRepository,
-    required this.paymentRequestRepository,
     required this.appSettingsRepository,
     required this.notificationRepository,
   });
 
   final AppUser currentUser;
   final LoanRepository loanRepository;
-  final PaymentRequestRepository paymentRequestRepository;
   final AppSettingsRepository appSettingsRepository;
   final NotificationRepository notificationRepository;
 
@@ -104,83 +97,67 @@ class _ClientHome extends StatelessWidget {
             body: Center(child: CircularProgressIndicator()),
           );
         }
-        return StreamBuilder<List<PaymentRequest>>(
-          stream: paymentRequestRepository.watchRequestsForUser(currentUser.id),
-          builder: (context, requestsSnapshot) {
-            if (!requestsSnapshot.hasData) {
+        return StreamBuilder<PaymentSettings>(
+          stream: appSettingsRepository.watchPaymentSettings(),
+          builder: (context, settingsSnapshot) {
+            if (!settingsSnapshot.hasData) {
               return const Scaffold(
                 body: Center(child: CircularProgressIndicator()),
               );
             }
-            return StreamBuilder<PaymentSettings>(
-              stream: appSettingsRepository.watchPaymentSettings(),
-              builder: (context, settingsSnapshot) {
-                if (!settingsSnapshot.hasData) {
+            return StreamBuilder<List<AppNotification>>(
+              stream: notificationRepository.watchForUser(currentUser.id),
+              builder: (context, notificationsSnapshot) {
+                if (!notificationsSnapshot.hasData) {
                   return const Scaffold(
                     body: Center(child: CircularProgressIndicator()),
                   );
                 }
-                return StreamBuilder<List<AppNotification>>(
-                  stream: notificationRepository.watchForUser(currentUser.id),
-                  builder: (context, notificationsSnapshot) {
-                    if (!notificationsSnapshot.hasData) {
-                      return const Scaffold(
-                        body: Center(child: CircularProgressIndicator()),
-                      );
-                    }
 
-                    final loans = loansSnapshot.data!;
-                    final notifications = notificationsSnapshot.data!;
+                final loans = loansSnapshot.data!;
+                final notifications = notificationsSnapshot.data!;
 
-                    return Scaffold(
-                      appBar: AppBar(
-                        title: const Text('Мои займы'),
-                        actions: [
-                          _NotificationsAction(
-                            user: currentUser,
-                            notifications: notifications,
-                            notificationRepository: notificationRepository,
-                          ),
-                          IconButton(
-                            tooltip: 'Настройки',
-                            onPressed: () =>
-                                _showSettingsSheet(context, currentUser),
-                            icon: Icon(
-                              Icons.settings_outlined,
-                              color: Theme.of(context).colorScheme.secondary,
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: 'Выйти',
-                            onPressed: () => _confirmLogout(context),
-                            icon: const Icon(
-                              Icons.logout_rounded,
-                              color: Color(0xFFFF8A80),
-                            ),
-                          ),
-                        ],
+                return Scaffold(
+                  appBar: AppBar(
+                    title: const Text('Мои займы'),
+                    actions: [
+                      _NotificationsAction(
+                        user: currentUser,
+                        notifications: notifications,
+                        notificationRepository: notificationRepository,
                       ),
-                      body: Stack(
-                        children: [
-                          ClientDashboard(
-                            user: currentUser,
-                            loans: loans,
-                            paymentRequests: requestsSnapshot.data!,
-                            paymentSettings: settingsSnapshot.data!,
-                            onPayNext: paymentRequestRepository
-                                .createNextInstallmentRequest,
-                            onCloseLoan:
-                                paymentRequestRepository.createFullCloseRequest,
-                          ),
-                          _NotificationEffects(
-                            user: currentUser,
-                            loans: loans,
-                            notifications: notifications,
-                          ),
-                        ],
+                      IconButton(
+                        tooltip: 'Настройки',
+                        onPressed: () => _showSettingsSheet(context, currentUser),
+                        icon: Icon(
+                          Icons.settings_outlined,
+                          color: Theme.of(context).colorScheme.secondary,
+                        ),
                       ),
-                    );
-                  },
+                      IconButton(
+                        tooltip: 'Выйти',
+                        onPressed: () => _confirmLogout(context),
+                        icon: const Icon(
+                          Icons.logout_rounded,
+                          color: Color(0xFFFF8A80),
+                        ),
+                      ),
+                    ],
+                  ),
+                  body: Stack(
+                    children: [
+                      ClientDashboard(
+                        user: currentUser,
+                        loans: loans,
+                        paymentSettings: settingsSnapshot.data!,
+                      ),
+                      _NotificationEffects(
+                        user: currentUser,
+                        loans: loans,
+                        notifications: notifications,
+                      ),
+                    ],
+                  ),
                 );
               },
             );
@@ -196,7 +173,6 @@ class _AdminHome extends StatefulWidget {
     required this.currentUser,
     required this.authRepository,
     required this.loanRepository,
-    required this.paymentRequestRepository,
     required this.appSettingsRepository,
     required this.notificationRepository,
     required this.backupService,
@@ -206,7 +182,6 @@ class _AdminHome extends StatefulWidget {
   final AppUser currentUser;
   final AuthRepository authRepository;
   final LoanRepository loanRepository;
-  final PaymentRequestRepository paymentRequestRepository;
   final AppSettingsRepository appSettingsRepository;
   final NotificationRepository notificationRepository;
   final BackupService backupService;
@@ -277,28 +252,27 @@ class _AdminHomeState extends State<_AdminHome> {
         clients: clients,
         existingLoan: loan,
         defaultSettings: loanDefaults,
-        onCreate:
-            ({
-              required String userId,
-              required String title,
-              required double principal,
-              required double interestPercent,
-              required double totalAmount,
-              required double dailyPenaltyAmount,
-              required List<PaymentScheduleItem> schedule,
-              String? note,
-            }) async {
-              await widget.loanRepository.createLoan(
-                userId: userId,
-                title: title,
-                principal: principal,
-                interestPercent: interestPercent,
-                totalAmount: totalAmount,
-                dailyPenaltyAmount: dailyPenaltyAmount,
-                schedule: schedule,
-                note: note,
-              );
-            },
+        onCreate: ({
+          required String userId,
+          required String title,
+          required double principal,
+          required double interestPercent,
+          required double totalAmount,
+          required double dailyPenaltyAmount,
+          required List<PaymentScheduleItem> schedule,
+          String? note,
+        }) async {
+          await widget.loanRepository.createLoan(
+            userId: userId,
+            title: title,
+            principal: principal,
+            interestPercent: interestPercent,
+            totalAmount: totalAmount,
+            dailyPenaltyAmount: dailyPenaltyAmount,
+            schedule: schedule,
+            note: note,
+          );
+        },
         onUpdate: widget.loanRepository.updateLoan,
       ),
     );
@@ -324,231 +298,179 @@ class _AdminHomeState extends State<_AdminHome> {
                   body: Center(child: CircularProgressIndicator()),
                 );
               }
-              return StreamBuilder<List<PaymentRequest>>(
-                stream: widget.paymentRequestRepository.watchAllRequests(),
-                builder: (context, requestsSnapshot) {
-                  if (!requestsSnapshot.hasData) {
+              return StreamBuilder<PaymentSettings>(
+                stream: widget.appSettingsRepository.watchPaymentSettings(),
+                builder: (context, paymentSettingsSnapshot) {
+                  if (!paymentSettingsSnapshot.hasData) {
                     return const Scaffold(
                       body: Center(child: CircularProgressIndicator()),
                     );
                   }
-                  return StreamBuilder<PaymentSettings>(
-                    stream: widget.appSettingsRepository.watchPaymentSettings(),
-                    builder: (context, paymentSettingsSnapshot) {
-                      if (!paymentSettingsSnapshot.hasData) {
+                  return StreamBuilder<LoanDefaultsSettings>(
+                    stream: widget.appSettingsRepository.watchLoanDefaults(),
+                    builder: (context, defaultsSnapshot) {
+                      if (!defaultsSnapshot.hasData) {
                         return const Scaffold(
                           body: Center(child: CircularProgressIndicator()),
                         );
                       }
-                      return StreamBuilder<LoanDefaultsSettings>(
-                        stream: widget.appSettingsRepository
-                            .watchLoanDefaults(),
-                        builder: (context, defaultsSnapshot) {
-                          if (!defaultsSnapshot.hasData) {
+                      return StreamBuilder<List<AppNotification>>(
+                        stream: widget.notificationRepository.watchForUser(
+                          widget.currentUser.id,
+                        ),
+                        builder: (context, notificationsSnapshot) {
+                          if (!notificationsSnapshot.hasData) {
                             return const Scaffold(
-                              body: Center(child: CircularProgressIndicator()),
+                              body: Center(
+                                child: CircularProgressIndicator(),
+                              ),
                             );
                           }
-                          return StreamBuilder<List<AppNotification>>(
-                            stream: widget.notificationRepository.watchForUser(
-                              widget.currentUser.id,
+
+                          final clients = clientsSnapshot.data!;
+                          final loans = loansSnapshot.data!;
+                          final paymentSettings = paymentSettingsSnapshot.data!;
+                          final loanDefaults = defaultsSnapshot.data!;
+                          final notifications = notificationsSnapshot.data!;
+
+                          return Scaffold(
+                            appBar: AppBar(
+                              title: const Text('Админ Панель'),
+                              actions: [
+                                _NotificationsAction(
+                                  user: widget.currentUser,
+                                  notifications: notifications,
+                                  notificationRepository:
+                                      widget.notificationRepository,
+                                ),
+                                IconButton(
+                                  tooltip: 'Настройки',
+                                  onPressed: () => _showSettingsSheet(
+                                    context,
+                                    widget.currentUser,
+                                    hideClosedLoans: _hideClosedLoans,
+                                    onAdminSettingsChanged: _updateAdminSettings,
+                                    loanDefaults: loanDefaults,
+                                    clockSettings: widget.clockSettings,
+                                    onSaveLoanDefaults: widget
+                                        .appSettingsRepository
+                                        .saveLoanDefaults,
+                                    onSaveClockSettings: widget
+                                        .appSettingsRepository
+                                        .saveClockSettings,
+                                    backupService: widget.backupService,
+                                    onClearDatabase: () => widget.backupService
+                                        .clearAllPreservingAdmin(
+                                          widget.currentUser.id,
+                                        ),
+                                  ),
+                                  icon: Icon(
+                                    Icons.settings_outlined,
+                                    color: Theme.of(context).colorScheme.secondary,
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: 'Выйти',
+                                  onPressed: () => _confirmLogout(context),
+                                  icon: const Icon(
+                                    Icons.logout_rounded,
+                                    color: Color(0xFFFF8A80),
+                                  ),
+                                ),
+                              ],
+                              bottom: const TabBar(
+                                tabs: [
+                                  Tab(
+                                    icon: Icon(Icons.people_outline),
+                                    text: 'Клиенты',
+                                  ),
+                                  Tab(
+                                    icon: Icon(
+                                      Icons.dashboard_customize_outlined,
+                                    ),
+                                    text: 'Управление',
+                                  ),
+                                ],
+                              ),
                             ),
-                            builder: (context, notificationsSnapshot) {
-                              if (!notificationsSnapshot.hasData) {
-                                return const Scaffold(
-                                  body: Center(
-                                    child: CircularProgressIndicator(),
-                                  ),
-                                );
-                              }
-
-                              final clients = clientsSnapshot.data!;
-                              final loans = loansSnapshot.data!;
-                              final requests = requestsSnapshot.data!;
-                              final paymentSettings =
-                                  paymentSettingsSnapshot.data!;
-                              final loanDefaults = defaultsSnapshot.data!;
-                              final notifications = notificationsSnapshot.data!;
-
-                              return Scaffold(
-                                appBar: AppBar(
-                                  title: const Text('Админ Панель'),
-                                  actions: [
-                                    _NotificationsAction(
-                                      user: widget.currentUser,
-                                      notifications: notifications,
-                                      notificationRepository:
-                                          widget.notificationRepository,
-                                    ),
-                                    IconButton(
-                                      tooltip: 'Настройки',
-                                      onPressed: () => _showSettingsSheet(
-                                        context,
-                                        widget.currentUser,
-                                        hideClosedLoans: _hideClosedLoans,
-                                        onAdminSettingsChanged:
-                                            _updateAdminSettings,
-                                        loanDefaults: loanDefaults,
-                                        clockSettings: widget.clockSettings,
-                                        onSaveLoanDefaults: widget
-                                            .appSettingsRepository
-                                            .saveLoanDefaults,
-                                        onSaveClockSettings: widget
-                                            .appSettingsRepository
-                                            .saveClockSettings,
-                                        backupService: widget.backupService,
-                                        onClearDatabase: () => widget
-                                            .backupService
-                                            .clearAllPreservingAdmin(
-                                              widget.currentUser.id,
-                                            ),
-                                      ),
-                                      icon: Icon(
-                                        Icons.settings_outlined,
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.secondary,
-                                      ),
-                                    ),
-                                    IconButton(
-                                      tooltip: 'Выйти',
-                                      onPressed: () => _confirmLogout(context),
-                                      icon: const Icon(
-                                        Icons.logout_rounded,
-                                        color: Color(0xFFFF8A80),
-                                      ),
-                                    ),
-                                  ],
-                                  bottom: const TabBar(
-                                    tabs: [
-                                      Tab(
-                                        icon: Icon(Icons.people_outline),
-                                        text: 'Клиенты',
-                                      ),
-                                      Tab(
-                                        icon: Icon(
-                                          Icons.dashboard_customize_outlined,
-                                        ),
-                                        text: 'Управление',
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                body: Stack(
+                            body: Stack(
+                              children: [
+                                TabBarView(
                                   children: [
-                                    TabBarView(
-                                      children: [
-                                        AdminClientsTab(
-                                          currentViewerId:
-                                              widget.currentUser.id,
-                                          clients: clients,
-                                          loans: loans,
-                                          paymentRequests: requests,
-                                          hideClosedLoans: _hideClosedLoans,
-                                          onEditLoan: (loan) => _openLoanEditor(
-                                            context,
-                                            clients,
-                                            loan,
-                                            loanDefaults,
-                                          ),
-                                        ),
-                                        AdminDashboard(
-                                          clients: clients,
-                                          loans: loans,
-                                          paymentRequests: requests,
-                                          paymentSettings: paymentSettings,
-                                          loanDefaults: loanDefaults,
-                                          onDeleteClients:
-                                              (clientsToDelete) async {
-                                                for (final client
-                                                    in clientsToDelete) {
-                                                  await widget
-                                                      .notificationRepository
-                                                      .deleteForUser(client.id);
-                                                  await widget
-                                                      .paymentRequestRepository
-                                                      .deleteRequestsForUser(
-                                                        client.id,
-                                                      );
-                                                  await widget.loanRepository
-                                                      .deleteLoansForUser(
-                                                        client.id,
-                                                      );
-                                                  await widget.authRepository
-                                                      .deleteUser(client.id);
-                                                }
-                                              },
-                                          onCreateClient:
-                                              ({
-                                                required String name,
-                                                required String phone,
-                                              }) => widget.authRepository
-                                                  .createUser(
-                                                    name: name,
-                                                    phone: phone,
-                                                    role: UserRole.client,
-                                                  ),
-                                          onIssueLoan:
-                                              ({
-                                                required String userId,
-                                                required String title,
-                                                required double principal,
-                                                required double interestPercent,
-                                                required double totalAmount,
-                                                required double
-                                                dailyPenaltyAmount,
-                                                required List<
-                                                  PaymentScheduleItem
-                                                >
-                                                schedule,
-                                                String? note,
-                                              }) async {
-                                                await widget.loanRepository
-                                                    .createLoan(
-                                                      userId: userId,
-                                                      title: title,
-                                                      principal: principal,
-                                                      interestPercent:
-                                                          interestPercent,
-                                                      totalAmount: totalAmount,
-                                                      dailyPenaltyAmount:
-                                                          dailyPenaltyAmount,
-                                                      schedule: schedule,
-                                                      note: note,
-                                                    );
-                                              },
-                                          onUpdateLoan:
-                                              widget.loanRepository.updateLoan,
-                                          onApproveRequest:
-                                              ({
-                                                required PaymentRequest request,
-                                                required Loan loan,
-                                              }) async {
-                                                await widget
-                                                    .paymentRequestRepository
-                                                    .approveRequest(
-                                                      request: request,
-                                                      loan: loan,
-                                                    );
-                                              },
-                                          onRejectRequest: widget
-                                              .paymentRequestRepository
-                                              .rejectRequest,
-                                          onSavePaymentSettings: widget
-                                              .appSettingsRepository
-                                              .savePaymentSettings,
-                                        ),
-                                      ],
+                                    AdminClientsTab(
+                                      currentViewerId: widget.currentUser.id,
+                                      clients: clients,
+                                      loans: loans,
+                                      hideClosedLoans: _hideClosedLoans,
+                                      onEditLoan: (loan) => _openLoanEditor(
+                                        context,
+                                        clients,
+                                        loan,
+                                        loanDefaults,
+                                      ),
                                     ),
-                                    _NotificationEffects(
-                                      user: widget.currentUser,
-                                      loans: const [],
-                                      notifications: notifications,
+                                    AdminDashboard(
+                                      clients: clients,
+                                      loans: loans,
+                                      paymentSettings: paymentSettings,
+                                      loanDefaults: loanDefaults,
+                                      onDeleteClients: (clientsToDelete) async {
+                                        for (final client in clientsToDelete) {
+                                          await widget.notificationRepository
+                                              .deleteForUser(client.id);
+                                          await widget.loanRepository
+                                              .deleteLoansForUser(client.id);
+                                          await widget.authRepository.deleteUser(
+                                            client.id,
+                                          );
+                                        }
+                                      },
+                                      onCreateClient: ({
+                                        required String name,
+                                        required String phone,
+                                      }) => widget.authRepository.createUser(
+                                        name: name,
+                                        phone: phone,
+                                        role: UserRole.client,
+                                      ),
+                                      onIssueLoan: ({
+                                        required String userId,
+                                        required String title,
+                                        required double principal,
+                                        required double interestPercent,
+                                        required double totalAmount,
+                                        required double dailyPenaltyAmount,
+                                        required List<PaymentScheduleItem>
+                                            schedule,
+                                        String? note,
+                                      }) async {
+                                        await widget.loanRepository.createLoan(
+                                          userId: userId,
+                                          title: title,
+                                          principal: principal,
+                                          interestPercent: interestPercent,
+                                          totalAmount: totalAmount,
+                                          dailyPenaltyAmount:
+                                              dailyPenaltyAmount,
+                                          schedule: schedule,
+                                          note: note,
+                                        );
+                                      },
+                                      onUpdateLoan:
+                                          widget.loanRepository.updateLoan,
+                                      onSavePaymentSettings: widget
+                                          .appSettingsRepository
+                                          .savePaymentSettings,
                                     ),
                                   ],
                                 ),
-                              );
-                            },
+                                _NotificationEffects(
+                                  user: widget.currentUser,
+                                  loans: const [],
+                                  notifications: notifications,
+                                ),
+                              ],
+                            ),
                           );
                         },
                       );

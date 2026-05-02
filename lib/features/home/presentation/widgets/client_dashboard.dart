@@ -7,7 +7,6 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../data/models/app_user.dart';
 import '../../../../data/models/loan.dart';
-import '../../../../data/models/payment_request.dart';
 import '../../../../data/models/payment_schedule_item.dart';
 import '../../../../data/models/payment_settings.dart';
 import '../../../../data/services/app_clock.dart';
@@ -17,18 +16,12 @@ class ClientDashboard extends StatefulWidget {
     super.key,
     required this.user,
     required this.loans,
-    required this.paymentRequests,
     required this.paymentSettings,
-    required this.onPayNext,
-    required this.onCloseLoan,
   });
 
   final AppUser user;
   final List<Loan> loans;
-  final List<PaymentRequest> paymentRequests;
   final PaymentSettings paymentSettings;
-  final Future<void> Function(Loan loan) onPayNext;
-  final Future<void> Function(Loan loan) onCloseLoan;
 
   @override
   State<ClientDashboard> createState() => _ClientDashboardState();
@@ -464,32 +457,12 @@ class _ClientDashboardState extends State<ClientDashboard> {
                               icon: const Icon(Icons.open_in_new_rounded),
                               label: const Text('Открыть банк'),
                             ),
-                          OutlinedButton.icon(
-                            onPressed: () async {
-                              Navigator.of(context).pop();
-                              try {
-                                if (fullClose) {
-                                  await widget.onCloseLoan(loan);
-                                } else {
-                                  await widget.onPayNext(loan);
-                                }
-                                if (!mounted) {
-                                  return;
-                                }
-                                messenger.showSnackBar(
-                                  const SnackBar(content: Text('Заявка отправлена администратору')),
-                                );
-                              } on Object catch (error) {
-                                if (!mounted) {
-                                  return;
-                                }
-                                messenger.showSnackBar(SnackBar(content: Text(error.toString())));
-                              }
-                            },
-                            icon: const Icon(Icons.fact_check_outlined),
-                            label: const Text('Я оплатил, отправить заявку'),
-                          ),
                         ],
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'После оплаты администратор отметит платёж вручную.',
+                        style: Theme.of(context).textTheme.bodyMedium,
                       ),
                     ],
                   ),
@@ -753,13 +726,6 @@ class _ClientDashboardState extends State<ClientDashboard> {
               },
               itemBuilder: (context, index) {
                 final loan = activeLoans[index];
-                PaymentRequest? pendingRequest;
-                for (final request in widget.paymentRequests) {
-                  if (request.loanId == loan.id && request.isPending) {
-                    pendingRequest = request;
-                    break;
-                  }
-                }
                 final isExpanded = _loadedPrefs && _expandedLoanIds.contains(loan.id);
                 final interactionsLocked = _dragPrepared || _reorderActive;
 
@@ -775,7 +741,6 @@ class _ClientDashboardState extends State<ClientDashboard> {
                     onExpansionChanged: interactionsLocked
                         ? (_) {}
                         : (expanded) => _toggleLoan(loan.id, expanded),
-                    pendingRequest: pendingRequest,
                     onPayNext: () => _openPaymentSheet(loan: loan, fullClose: false),
                     onCloseLoan: () => _openPaymentSheet(loan: loan, fullClose: true),
                     dragIndicator: Listener(
@@ -914,7 +879,7 @@ class _ClosedLoanCard extends StatelessWidget {
               'Факт. выплата: ${Formatters.date(actualStartDate)} - ${Formatters.date(actualEndDate)}',
             ),
             Text('Сумма займа: ${Formatters.money(loan.principal)}'),
-            Text('Плановая сумма к возврату: ${Formatters.money(loan.totalAmount)}'),
+                        Text('Плановая сумма к возврату: ${Formatters.money(loan.plannedTotalAmount)}'),
             Text('Выплачено фактически: ${Formatters.money(loan.paidAmount)}'),
           ],
         ),
@@ -930,7 +895,6 @@ class _LoanCard extends StatelessWidget {
     required this.isDragReady,
     required this.showDragHint,
     required this.onExpansionChanged,
-    required this.pendingRequest,
     required this.onPayNext,
     required this.onCloseLoan,
     this.dragIndicator,
@@ -941,7 +905,6 @@ class _LoanCard extends StatelessWidget {
   final bool isDragReady;
   final bool showDragHint;
   final ValueChanged<bool> onExpansionChanged;
-  final PaymentRequest? pendingRequest;
   final Future<void> Function() onPayNext;
   final Future<void> Function() onCloseLoan;
   final Widget? dragIndicator;
@@ -1070,7 +1033,7 @@ class _LoanCard extends StatelessWidget {
                               Text('Сумма займа: ${Formatters.money(loan.principal)}'),
                               Text('Процент: ${Formatters.decimalInput(loan.interestPercent)}%'),
                               Text(
-                                'К возврату по плану: ${Formatters.money(loan.totalAmount)}',
+                          'К возврату по плану: ${Formatters.money(loan.plannedTotalAmount)}',
                               ),
                               Text(
                                 'Сейчас к закрытию: ${Formatters.money(loan.fullCloseAmount)}',
@@ -1079,15 +1042,6 @@ class _LoanCard extends StatelessWidget {
                                 'Процент за день: ${Formatters.money(loan.dailyInterestAmount)}',
                               ),
                               Text('Пеня за день: ${Formatters.money(loan.dailyPenaltyAmount)}'),
-                              if (pendingRequest != null) ...[
-                                const SizedBox(height: 10),
-                                _StatusChip(
-                                  label: pendingRequest!.type == PaymentRequestType.fullClose
-                                      ? 'Ожидает подтверждения полного погашения'
-                                      : 'Ожидает подтверждения платежа',
-                                  color: Theme.of(context).colorScheme.secondary,
-                                ),
-                              ],
                               if ((loan.note ?? '').trim().isNotEmpty) ...[
                                 const SizedBox(height: 10),
                                 Text(loan.note!),
@@ -1097,13 +1051,9 @@ class _LoanCard extends StatelessWidget {
                                 children: [
                                   Expanded(
                                     child: ElevatedButton.icon(
-                                      onPressed: pendingRequest == null ? onPayNext : null,
+                                      onPressed: onPayNext,
                                       icon: const Icon(Icons.payments_outlined),
-                                      label: Text(
-                                        pendingRequest == null
-                                            ? 'Оплатить следующий платёж'
-                                            : 'Заявка уже отправлена',
-                                      ),
+                                      label: const Text('Оплатить следующий платёж'),
                                     ),
                                   ),
                                 ],
@@ -1113,7 +1063,7 @@ class _LoanCard extends StatelessWidget {
                                 children: [
                                   Expanded(
                                     child: OutlinedButton.icon(
-                                      onPressed: pendingRequest == null ? onCloseLoan : null,
+                                      onPressed: onCloseLoan,
                                       icon: const Icon(Icons.task_alt_outlined),
                                       label: const Text('Погасить полностью'),
                                     ),

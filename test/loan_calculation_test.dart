@@ -3,7 +3,6 @@ import 'package:microzaimich/data/models/app_clock_settings.dart';
 import 'package:microzaimich/data/models/loan.dart';
 import 'package:microzaimich/data/models/payment_schedule_item.dart';
 import 'package:microzaimich/data/services/app_clock.dart';
-import 'package:microzaimich/core/utils/formatters.dart';
 
 void main() {
   tearDown(() {
@@ -81,7 +80,7 @@ void main() {
             isPaid: true,
             penaltyAccrued: 30,
             principalAmount: 500,
-            interestAccruedPaid: 50,
+            interestAccruedPaid: 2.48,
             paidAt: DateTime.utc(2026, 4, 10),
           ),
           PaymentScheduleItem(
@@ -96,9 +95,9 @@ void main() {
         ],
       );
 
-      expect(loan.paidAmount, 580);
-      expect(loan.plannedPaidAmount, 550);
-      expect(loan.plannedOutstandingAmount, 550);
+      expect(loan.paidAmount, 531.83);
+      expect(loan.plannedPaidAmount, 501.83);
+      expect(loan.plannedOutstandingAmount, 502.10);
     });
 
     test('next installment amount includes accrued interest on request date', () {
@@ -142,8 +141,8 @@ void main() {
         ],
       );
 
-      expect(loan.interestOutstanding, 25);
-      expect(loan.nextInstallmentAmount, 525);
+      expect(loan.interestOutstanding, 1.37);
+      expect(loan.nextInstallmentAmount, 500.69);
     });
 
     test('planned outstanding includes accrued unpaid penalty', () {
@@ -188,7 +187,7 @@ void main() {
       );
 
       expect(loan.penaltyOutstanding, 60);
-      expect(loan.plannedOutstandingAmount, 1160);
+      expect(loan.plannedOutstandingAmount, 1063.93);
     });
 
     test('interest stops growing while payment is overdue', () {
@@ -250,14 +249,14 @@ void main() {
           isPaid: true,
           penaltyAccrued: 40,
           principalAmount: 500,
-          interestAccruedPaid: 47.37,
+          interestAccruedPaid: 2.48,
           paidAt: DateTime.utc(2026, 4, 13),
         ),
       );
 
       expect(loan.penaltyOutstanding, 0);
-      expect(loan.interestOutstanding, 15.79);
-      expect(loan.fullCloseAmount, 515.79);
+      expect(loan.interestOutstanding, 0.4);
+      expect(loan.fullCloseAmount, 501.05);
     });
 
     test('full close before due date excludes future interest', () {
@@ -276,9 +275,9 @@ void main() {
         secondDueDate: DateTime.utc(2026, 4, 21),
       );
 
-      expect(loan.interestOutstanding, 25);
+      expect(loan.interestOutstanding, 1.37);
       expect(loan.penaltyOutstanding, 0);
-      expect(loan.fullCloseAmount, 1025);
+      expect(loan.fullCloseAmount, 1001.37);
       expect(loan.fullCloseAmount, lessThan(loan.totalAmount));
     });
 
@@ -298,9 +297,144 @@ void main() {
         secondDueDate: DateTime.utc(2026, 4, 20),
       );
 
-      expect(loan.interestOutstanding, 47.37);
+      expect(loan.interestOutstanding, 2.48);
       expect(loan.penaltyOutstanding, 60);
-      expect(loan.nextInstallmentAmount, Formatters.centsUp(500 + 47.37 + 60));
+      expect(loan.nextInstallmentAmount, 561.84);
+    });
+
+    test('planned interest decreases as principal balance goes down', () {
+      final loan = buildTwoPartLoan(
+        id: 'loan-8',
+        issuedAt: DateTime.utc(2026, 4, 1),
+        firstDueDate: DateTime.utc(2026, 4, 10),
+        secondDueDate: DateTime.utc(2026, 4, 20),
+      );
+
+      final firstItem = loan.orderedSchedule.first;
+      final secondItem = loan.orderedSchedule.last;
+
+      expect(loan.plannedInterestForItem(firstItem), 2.61);
+      expect(loan.plannedInterestForItem(secondItem), 1.32);
+      expect(
+        loan.plannedInterestForItem(firstItem),
+        greaterThan(loan.plannedInterestForItem(secondItem)),
+      );
+    });
+
+    test('all planned payments except last stay equal after rounding', () {
+      final issuedAt = DateTime.utc(2026, 5, 2);
+      final schedule = List.generate(
+        6,
+        (index) => PaymentScheduleItem(
+          id: 'p$index',
+          dueDate: DateTime.utc(2026, 6 + index, 2),
+          amount: 0,
+          isPaid: false,
+          penaltyAccrued: 0,
+          principalAmount: 0,
+          interestAccruedPaid: 0,
+        ),
+      );
+
+      final loan = Loan(
+        id: 'loan-9',
+        userId: 'user-9',
+        title: 'Loan 9',
+        principal: 5000,
+        interestPercent: 15,
+        totalAmount: 0,
+        dailyPenaltyAmount: 20,
+        issuedAt: issuedAt,
+        status: 'active',
+        schedule: schedule,
+      );
+
+      final totals = loan.orderedSchedule
+          .map(
+            (item) => loan.principalAmountForItem(item) + loan.plannedInterestForItem(item),
+          )
+          .toList();
+
+      expect(totals.take(5).toSet().length, 1);
+      expect((totals.last - totals.first).abs(), lessThanOrEqualTo(0.01));
+    });
+
+    test('planned total matches displayed payment sum without extra cent', () {
+      final loan = Loan(
+        id: 'loan-10',
+        userId: 'user-10',
+        title: 'Loan 10',
+        principal: 5000,
+        interestPercent: 10,
+        totalAmount: 0,
+        dailyPenaltyAmount: 20,
+        issuedAt: DateTime.utc(2026, 5, 2),
+        status: 'active',
+        schedule: [
+          PaymentScheduleItem(
+            id: 'p1',
+            dueDate: DateTime.utc(2026, 6, 2),
+            amount: 0,
+            isPaid: false,
+            penaltyAccrued: 0,
+            principalAmount: 0,
+            interestAccruedPaid: 0,
+          ),
+          PaymentScheduleItem(
+            id: 'p2',
+            dueDate: DateTime.utc(2026, 7, 2),
+            amount: 0,
+            isPaid: false,
+            penaltyAccrued: 0,
+            principalAmount: 0,
+            interestAccruedPaid: 0,
+          ),
+          PaymentScheduleItem(
+            id: 'p3',
+            dueDate: DateTime.utc(2026, 8, 2),
+            amount: 0,
+            isPaid: false,
+            penaltyAccrued: 0,
+            principalAmount: 0,
+            interestAccruedPaid: 0,
+          ),
+          PaymentScheduleItem(
+            id: 'p4',
+            dueDate: DateTime.utc(2026, 9, 2),
+            amount: 0,
+            isPaid: false,
+            penaltyAccrued: 0,
+            principalAmount: 0,
+            interestAccruedPaid: 0,
+          ),
+          PaymentScheduleItem(
+            id: 'p5',
+            dueDate: DateTime.utc(2026, 10, 2),
+            amount: 0,
+            isPaid: false,
+            penaltyAccrued: 0,
+            principalAmount: 0,
+            interestAccruedPaid: 0,
+          ),
+          PaymentScheduleItem(
+            id: 'p6',
+            dueDate: DateTime.utc(2026, 11, 2),
+            amount: 0,
+            isPaid: false,
+            penaltyAccrued: 0,
+            principalAmount: 0,
+            interestAccruedPaid: 0,
+          ),
+        ],
+      );
+
+      final displayedSum = loan.orderedSchedule.fold<double>(
+        0,
+        (sum, item) => sum + loan.plannedAmountForItem(item),
+      );
+
+      expect(displayedSum, 5148.06);
+      expect(loan.plannedTotalAmount, displayedSum);
     });
   });
 }

@@ -36,6 +36,9 @@ class Loan {
   List<PaymentScheduleItem> get orderedSchedule =>
       [...schedule]..sort((a, b) => a.dueDate.compareTo(b.dueDate));
 
+  double get annualInterestRateFraction =>
+      math.max(interestPercent, 0) / 100;
+
   String get displayTitle {
     final trimmed = title.trim();
     if (trimmed.isNotEmpty) {
@@ -48,7 +51,10 @@ class Loan {
   }
 
   double get plannedInterestAmount =>
-      Formatters.cents(math.max(totalAmount - principal, 0));
+      _sumRounded(_plannedInstallments.map((item) => item.interest));
+
+  double get plannedTotalAmount =>
+      _sumRounded(_plannedInstallments.map((item) => item.total));
 
   DateTime get termEndDate =>
       orderedSchedule.isEmpty ? issuedAt : orderedSchedule.last.dueDate;
@@ -59,49 +65,20 @@ class Loan {
   }
 
   double get dailyInterestAmount {
-    if (plannedInterestAmount <= 0) {
+    if (annualInterestRateFraction <= 0 || principalOutstanding <= 0) {
       return 0;
     }
-    return plannedInterestAmount / termDays;
+    return Formatters.centsUp(
+      principalOutstanding * annualInterestRateFraction / 365,
+    );
   }
 
   double principalAmountForItem(PaymentScheduleItem item) {
-    if (item.principalAmount != null && item.principalAmount! > 0) {
-      return Formatters.cents(item.principalAmount!);
-    }
-
-    final sorted = orderedSchedule;
-    final totalScheduledAmount = sorted.fold<double>(
-      0,
-      (runningTotal, scheduleItem) => runningTotal + scheduleItem.amount,
-    );
-
-    if (totalScheduledAmount <= 0 || principal <= 0) {
+    final installment = _plannedInstallmentById(item.id);
+    if (installment == null) {
       return 0;
     }
-
-    final rawPrincipal = principal * (item.amount / totalScheduledAmount);
-    final index = sorted.indexWhere(
-      (scheduleItem) => scheduleItem.id == item.id,
-    );
-
-    if (index == -1) {
-      return Formatters.cents(rawPrincipal);
-    }
-
-    if (index == sorted.length - 1) {
-      final distributed = sorted.take(index).fold<double>(0, (
-        runningTotal,
-        scheduleItem,
-      ) {
-        final scheduleRawPrincipal =
-            principal * (scheduleItem.amount / totalScheduledAmount);
-        return runningTotal + Formatters.cents(scheduleRawPrincipal);
-      });
-      return Formatters.cents(math.max(principal - distributed, 0));
-    }
-
-    return Formatters.cents(rawPrincipal);
+    return installment.principal;
   }
 
   double get principalPaid => Formatters.cents(
@@ -150,14 +127,13 @@ class Loan {
     final elapsedDays = nowDate.difference(issuedDate).inDays;
     for (var dayIndex = 1; dayIndex <= elapsedDays; dayIndex++) {
       final day = issuedDate.add(Duration(days: dayIndex));
-      final hasOverdue = orderedSchedule.any(
-        (item) => _isItemOverdueOnDate(item, day),
-      );
+      final hasOverdue = orderedSchedule.any((item) => _isItemOverdueOnDate(item, day));
 
       if (hasOverdue) {
         accruedPenalty += dailyPenaltyAmount;
       } else if (!day.isAfter(effectiveEndDate)) {
-        accruedInterest += dailyInterestAmount;
+        accruedInterest +=
+            _principalOutstandingOnDate(day) * annualInterestRateFraction / 365;
       }
     }
 
@@ -186,7 +162,7 @@ class Loan {
 
   double get plannedOutstandingAmount =>
       Formatters.centsUp(
-        math.max(totalAmount - plannedPaidAmount, 0) + penaltyOutstanding,
+        math.max(plannedTotalAmount - plannedPaidAmount, 0) + penaltyOutstanding,
       );
 
   PaymentScheduleItem? get nextUnpaid {
@@ -233,34 +209,19 @@ class Loan {
   }
 
   double plannedInterestForItem(PaymentScheduleItem item) {
-    if (item.interestAccruedPaid > 0) {
-      return Formatters.centsUp(item.interestAccruedPaid);
-    }
-
-    final sorted = orderedSchedule;
-    final index = sorted.indexWhere(
-      (scheduleItem) => scheduleItem.id == item.id,
-    );
-    if (index == -1) {
+    final installment = _plannedInstallmentById(item.id);
+    if (installment == null) {
       return 0;
     }
+    return installment.interest;
+  }
 
-    if (index == sorted.length - 1) {
-      final distributed = sorted
-          .take(index)
-          .fold<double>(
-            0,
-            (runningTotal, scheduleItem) =>
-                runningTotal + plannedInterestForItem(scheduleItem),
-          );
-      return Formatters.centsUp(
-        math.max(plannedInterestAmount - distributed, 0),
-      );
+  double plannedAmountForItem(PaymentScheduleItem item) {
+    final installment = _plannedInstallmentById(item.id);
+    if (installment == null) {
+      return 0;
     }
-
-    final rawInterest =
-        plannedInterestAmount * (periodDaysForItem(item) / termDays);
-    return Formatters.centsUp(rawInterest);
+    return installment.total;
   }
 
   double interestForItem(PaymentScheduleItem item, {DateTime? at}) {
@@ -275,6 +236,12 @@ class Loan {
   }
 
   double amountForItem(PaymentScheduleItem item, {DateTime? at}) {
+    if (!item.isPaid) {
+      final next = nextUnpaid;
+      if (next == null || next.id != item.id) {
+        return plannedAmountForItem(item);
+      }
+    }
     final principalPart = principalAmountForItem(item);
     final interestPart = interestForItem(item, at: at);
     final penaltyPart = penaltyForItem(item, at: at);
@@ -406,6 +373,126 @@ class Loan {
 
   static DateTime _dateOnly(DateTime date) =>
       DateTime(date.year, date.month, date.day);
+
+  double _principalOutstandingOnDate(DateTime date) {
+    final paidPrincipal = orderedSchedule.fold<double>(0, (runningTotal, item) {
+      if (_isItemPaidByDate(item, date)) {
+        return runningTotal + principalAmountForItem(item);
+      }
+      return runningTotal;
+    });
+    return math.max(principal - paidPrincipal, 0);
+  }
+
+  List<_PlannedInstallment> get _plannedInstallments {
+    final sorted = orderedSchedule;
+    if (sorted.isEmpty || principal <= 0) {
+      return const [];
+    }
+
+    final averagePeriodDays = termDays / sorted.length;
+    final periodicRate =
+        annualInterestRateFraction <= 0
+            ? 0.0
+            : annualInterestRateFraction * averagePeriodDays / 365;
+    final rates = List<double>.filled(sorted.length, periodicRate);
+
+    final commonPayment = _annuityPayment(rates);
+    final installments = <_PlannedInstallment>[];
+    var remainingPrincipal = Formatters.cents(principal);
+
+    for (var index = 0; index < sorted.length; index++) {
+      final item = sorted[index];
+      final isLast = index == sorted.length - 1;
+
+      double principalPart;
+      double interestPart;
+      double totalPart;
+
+      if (isLast) {
+        principalPart = Formatters.centsUp(math.max(remainingPrincipal, 0));
+        interestPart = Formatters.centsUp(
+          math.max(commonPayment - principalPart, 0),
+        );
+      } else {
+        interestPart = Formatters.centsUp(remainingPrincipal * rates[index]);
+        totalPart = commonPayment;
+        principalPart = Formatters.cents(math.max(totalPart - interestPart, 0));
+        if (principalPart > remainingPrincipal) {
+          principalPart = remainingPrincipal;
+        }
+      }
+      totalPart = Formatters.centsUp(principalPart + interestPart);
+      installments.add(
+        _PlannedInstallment(
+          id: item.id,
+          principal: principalPart,
+          interest: interestPart,
+          total: totalPart,
+        ),
+      );
+
+      remainingPrincipal = Formatters.cents(
+        math.max(remainingPrincipal - principalPart, 0),
+      );
+    }
+
+    return installments;
+  }
+
+  _PlannedInstallment? _plannedInstallmentById(String itemId) {
+    for (final installment in _plannedInstallments) {
+      if (installment.id == itemId) {
+        return installment;
+      }
+    }
+    return null;
+  }
+
+  double _annuityPayment(List<double> rates) {
+    if (rates.isEmpty || principal <= 0) {
+      return 0;
+    }
+
+    if (rates.every((rate) => rate <= 0)) {
+      return Formatters.centsUp(principal / rates.length);
+    }
+
+    var multiplier = 1.0;
+    var paymentWeight = 0.0;
+    for (final rate in rates) {
+      multiplier *= (1 + rate);
+      paymentWeight = paymentWeight * (1 + rate) + 1;
+    }
+
+    if (paymentWeight <= 0) {
+      return 0;
+    }
+
+    return Formatters.centsUp(principal * multiplier / paymentWeight);
+  }
+
+  double _sumRounded(Iterable<double> values) {
+    final totalCents = values.fold<int>(
+      0,
+      (runningTotal, value) => runningTotal + (value * 100).round(),
+    );
+    return totalCents / 100;
+  }
+}
+
+class _PlannedInstallment {
+  const _PlannedInstallment({
+    required this.id,
+    required this.principal,
+    required this.interest,
+    required this.total,
+  });
+
+  final String id;
+  final double principal;
+  final double interest;
+  final double total;
 }
 
 class LoanAccrualSnapshot {
