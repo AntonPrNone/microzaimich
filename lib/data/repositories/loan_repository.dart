@@ -110,11 +110,51 @@ class LoanRepository {
   }
 
   Future<void> updateLoan(Loan loan) async {
+    final previousSnapshot = await _firestoreService.loans.doc(loan.id).get();
+    final previousLoan = previousSnapshot.exists ? Loan.fromDoc(previousSnapshot) : null;
     final isClosed = loan.schedule.every((item) => item.isPaid);
     await _firestoreService.loans.doc(loan.id).update({
       ...loan.toMap(),
       'status': isClosed ? 'closed' : loan.status,
     });
+
+    if (previousLoan == null) {
+      return;
+    }
+
+    final previousItems = {
+      for (final item in previousLoan.schedule) item.id: item,
+    };
+    final newlyPaidItems = loan.schedule.where((item) {
+      final previousItem = previousItems[item.id];
+      return item.isPaid && (previousItem == null || !previousItem.isPaid);
+    }).toList()
+      ..sort((a, b) => a.dueDate.compareTo(b.dueDate));
+
+    if (newlyPaidItems.isEmpty) {
+      return;
+    }
+
+    if (isClosed && previousLoan.status != 'closed') {
+      await _notificationRepository.notifyUser(
+        userId: loan.userId,
+        title: 'Займ закрыт',
+        body:
+            'Администратор отметил полное погашение по займу ${loan.displayTitle}.',
+        type: AppNotificationType.paymentApproved,
+      );
+      return;
+    }
+
+    final paymentDate = newlyPaidItems.last.paidAt;
+    await _notificationRepository.notifyUser(
+      userId: loan.userId,
+      title: 'Платёж отмечен как оплаченный',
+      body:
+          'Администратор отметил оплату по займу ${loan.displayTitle}'
+          '${paymentDate == null ? '' : ' от ${Formatters.date(paymentDate)}'}.',
+      type: AppNotificationType.paymentApproved,
+    );
   }
 
   Future<void> deleteLoansForUser(String userId) async {

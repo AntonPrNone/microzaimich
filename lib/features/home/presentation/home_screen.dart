@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -9,6 +10,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/utils/formatters.dart';
+import '../../../core/utils/app_snackbar.dart';
 import '../../../data/models/app_notification.dart';
 import '../../../data/models/app_clock_settings.dart';
 import '../../../data/models/app_user.dart';
@@ -351,6 +353,10 @@ class _AdminHomeState extends State<_AdminHome> {
                                     hideClosedLoans: _hideClosedLoans,
                                     onAdminSettingsChanged: _updateAdminSettings,
                                     loanDefaults: loanDefaults,
+                                    paymentSettings: paymentSettings,
+                                    onSavePaymentSettings: widget
+                                        .appSettingsRepository
+                                        .savePaymentSettings,
                                     clockSettings: widget.clockSettings,
                                     onSaveLoanDefaults: widget
                                         .appSettingsRepository
@@ -824,6 +830,8 @@ void _showSettingsSheet(
   Future<void> Function({required bool hideClosedLoans})? onAdminSettingsChanged,
   LoanDefaultsSettings loanDefaults = const LoanDefaultsSettings.empty(),
   Future<void> Function(LoanDefaultsSettings settings)? onSaveLoanDefaults,
+  PaymentSettings paymentSettings = const PaymentSettings.empty(),
+  Future<void> Function(PaymentSettings settings)? onSavePaymentSettings,
   AppClockSettings clockSettings = const AppClockSettings.disabled(),
   Future<void> Function(AppClockSettings settings)? onSaveClockSettings,
   BackupService? backupService,
@@ -840,6 +848,8 @@ void _showSettingsSheet(
       onAdminSettingsChanged: onAdminSettingsChanged,
       loanDefaults: loanDefaults,
       onSaveLoanDefaults: onSaveLoanDefaults,
+      paymentSettings: paymentSettings,
+      onSavePaymentSettings: onSavePaymentSettings,
       clockSettings: clockSettings,
       onSaveClockSettings: onSaveClockSettings,
       backupService: backupService,
@@ -877,9 +887,11 @@ class _SettingsSheet extends StatefulWidget {
     required this.user,
     required this.hideClosedLoans,
     required this.loanDefaults,
+    required this.paymentSettings,
     required this.clockSettings,
     this.onAdminSettingsChanged,
     this.onSaveLoanDefaults,
+    this.onSavePaymentSettings,
     this.onSaveClockSettings,
     this.backupService,
     this.onClearDatabase,
@@ -890,9 +902,11 @@ class _SettingsSheet extends StatefulWidget {
   final Future<void> Function({required bool hideClosedLoans})?
   onAdminSettingsChanged;
   final LoanDefaultsSettings loanDefaults;
+  final PaymentSettings paymentSettings;
   final AppClockSettings clockSettings;
   final Future<void> Function(LoanDefaultsSettings settings)?
   onSaveLoanDefaults;
+  final Future<void> Function(PaymentSettings settings)? onSavePaymentSettings;
   final Future<void> Function(AppClockSettings settings)? onSaveClockSettings;
   final BackupService? backupService;
   final Future<void> Function()? onClearDatabase;
@@ -910,6 +924,8 @@ class _SettingsSheetState extends State<_SettingsSheet> {
   late bool _hideClosedLoans;
   late _SettingsIntervalUnit _intervalUnit;
   late bool _debugTimeEnabled;
+  late TimeOfDay _adminReminderTime;
+  late TimeOfDay _clientReminderTime;
   DateTime? _debugNow;
   bool _backupInProgress = false;
 
@@ -937,10 +953,16 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     _intervalUnit = _SettingsIntervalUnit.fromStorage(
       widget.loanDefaults.paymentIntervalUnit,
     );
+    _adminReminderTime = TimeOfDay(
+      hour: widget.paymentSettings.adminDueReminderHour,
+      minute: widget.paymentSettings.adminDueReminderMinute,
+    );
+    _clientReminderTime = const TimeOfDay(hour: 10, minute: 0);
     _debugTimeEnabled = widget.clockSettings.debugEnabled;
     _debugNow = widget.clockSettings.debugNow == null
         ? null
         : AppClock.toMoscow(widget.clockSettings.debugNow!);
+    unawaited(_loadReminderTimes());
   }
 
   @override
@@ -951,6 +973,22 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     _countController.dispose();
     _intervalCountController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadReminderTimes() async {
+    final adminTime = await LocalNotificationService.getReminderTime(
+      forAdmin: true,
+    );
+    final clientTime = await LocalNotificationService.getReminderTime(
+      forAdmin: false,
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _adminReminderTime = adminTime;
+      _clientReminderTime = clientTime;
+    });
   }
 
   Future<void> _saveClockSettings({
@@ -1128,6 +1166,166 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     }
   }
 
+  Future<void> _pickAdminReminderTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _adminReminderTime,
+    );
+    if (picked == null || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _adminReminderTime = picked;
+    });
+
+    await widget.onSavePaymentSettings?.call(
+      widget.paymentSettings.copyWith(
+        adminDueReminderHour: picked.hour,
+        adminDueReminderMinute: picked.minute,
+        updatedAt: AppClock.nowForStorage(),
+      ),
+    );
+
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Время напоминания админу: ${picked.format(context)}',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickReminderTime({required bool forAdmin}) async {
+    final currentTime = forAdmin ? _adminReminderTime : _clientReminderTime;
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: currentTime,
+    );
+    if (picked == null || !mounted) {
+      return;
+    }
+
+    await LocalNotificationService.setReminderTime(
+      forAdmin: forAdmin,
+      time: picked,
+    );
+
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      if (forAdmin) {
+        _adminReminderTime = picked;
+      } else {
+        _clientReminderTime = picked;
+      }
+    });
+    showAppSnackBar(
+      forAdmin
+          ? 'Время уведомлений о платежах клиентов: ${picked.format(context)}'
+          : 'Время ваших напоминаний о платежах: ${picked.format(context)}',
+    );
+  }
+
+  Future<void> _changePassword() async {
+    final passwordController = TextEditingController();
+    final confirmController = TextEditingController();
+    String? validationError;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Сменить пароль'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: passwordController,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Новый пароль',
+                    prefixIcon: Icon(Icons.lock_outline_rounded),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: confirmController,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Повторите пароль',
+                    prefixIcon: Icon(Icons.verified_user_outlined),
+                  ),
+                ),
+                if (validationError != null) ...[
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      validationError!,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: const Color(0xFFFF8A80),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Отмена'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final password = passwordController.text.trim();
+                  final confirm = confirmController.text.trim();
+                  if (password.length < 4) {
+                    setDialogState(() {
+                      validationError = 'Пароль должен быть не короче 4 символов';
+                    });
+                    return;
+                  }
+                  if (password != confirm) {
+                    setDialogState(() {
+                      validationError = 'Пароли не совпадают';
+                    });
+                    return;
+                  }
+                  Navigator.of(dialogContext).pop(true);
+                },
+                child: const Text('Сохранить'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) {
+      passwordController.dispose();
+      confirmController.dispose();
+      return;
+    }
+
+    try {
+      await context.read<LoginController>().changePassword(
+        passwordController.text.trim(),
+      );
+      showAppSnackBar('Пароль обновлён');
+    } on Object catch (error) {
+      showAppSnackBar('Не удалось сменить пароль: $error');
+    } finally {
+      passwordController.dispose();
+      confirmController.dispose();
+    }
+  }
+
   Future<void> _clearDatabase() async {
     if (widget.onClearDatabase == null || _backupInProgress) {
       return;
@@ -1192,6 +1390,52 @@ class _SettingsSheetState extends State<_SettingsSheet> {
         });
       }
     }
+  }
+
+  List<Widget> _buildCommonSettingsSections(BuildContext context) {
+    final reminderTitle = _isAdmin
+        ? 'Время уведомлений о платежах клиентов'
+        : 'Время моих напоминаний о платежах';
+    final reminderSubtitle = _isAdmin
+        ? 'Когда на этом устройстве напоминать администратору о клиентах, у которых сегодня день платежа'
+        : 'Когда на этом устройстве показывать напоминания за день и в день вашего платежа';
+    final reminderTime = _isAdmin ? _adminReminderTime : _clientReminderTime;
+
+    return [
+      _SettingsSectionCard(
+        title: 'Уведомления',
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              reminderSubtitle,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => _pickReminderTime(forAdmin: _isAdmin),
+                icon: const Icon(Icons.notifications_active_outlined),
+                label: Text('$reminderTitle: ${reminderTime.format(context)}'),
+              ),
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 16),
+      _SettingsSectionCard(
+        title: 'Безопасность',
+        child: SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: _changePassword,
+            icon: const Icon(Icons.lock_reset_outlined),
+            label: const Text('Сменить пароль'),
+          ),
+        ),
+      ),
+    ];
   }
 
   List<Widget> _buildAdminSettingsSections(BuildContext context) {
@@ -1479,7 +1723,11 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 title: const Text('Телефон'),
                 subtitle: Text(Formatters.phone(widget.user.phone)),
               ),
-              if (_isAdmin) ..._buildAdminSettingsSections(context),
+              ..._buildCommonSettingsSections(context),
+              if (_isAdmin) ...[
+                const SizedBox(height: 16),
+                ..._buildAdminSettingsSections(context),
+              ],
               if (DateTime.now().year < 0) ...[
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,

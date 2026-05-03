@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 
+import '../core/utils/app_snackbar.dart';
 import '../data/repositories/auth_repository.dart';
 import '../data/repositories/app_settings_repository.dart';
 import '../data/repositories/loan_repository.dart';
@@ -84,6 +85,7 @@ class MicrozaimichApp extends StatelessWidget {
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
+        scaffoldMessengerKey: rootScaffoldMessengerKey,
         title: 'Микрозаймич',
         theme: AppTheme.dark(),
         locale: const Locale('ru', 'RU'),

@@ -32,6 +32,10 @@ class LoanNotificationService : Service() {
         private const val KEY_BOOTSTRAPPED = "listener_bootstrapped"
         private const val KEY_DELIVERED_IDS = "delivered_ids"
         private const val KEY_SENT_REMINDERS = "sent_reminders"
+        private const val KEY_ADMIN_REMINDER_HOUR = "admin_reminder_hour"
+        private const val KEY_ADMIN_REMINDER_MINUTE = "admin_reminder_minute"
+        private const val KEY_CLIENT_REMINDER_HOUR = "client_reminder_hour"
+        private const val KEY_CLIENT_REMINDER_MINUTE = "client_reminder_minute"
     }
 
     private val serviceChannelId = "loan_service_status"
@@ -44,7 +48,7 @@ class LoanNotificationService : Service() {
             if (!userId.isNullOrBlank()) {
                 checkLoanReminders(userId)
             }
-            handler.postDelayed(this, 15 * 60 * 1000L)
+            handler.postDelayed(this, 60 * 1000L)
         }
     }
     private var listenerRegistration: ListenerRegistration? = null
@@ -216,6 +220,31 @@ class LoanNotificationService : Service() {
 
     private fun checkLoanReminders(userId: String) {
         FirebaseFirestore.getInstance()
+            .collection("users")
+            .document(userId)
+            .get()
+            .addOnSuccessListener { userSnapshot ->
+                val role = userSnapshot.getString("role").orEmpty()
+                if (role == "admin") {
+                    checkAdminLoanReminders()
+                } else {
+                    checkClientLoanReminders(userId)
+                }
+            }
+    }
+
+    private fun checkClientLoanReminders(userId: String) {
+        val nowCalendar = Calendar.getInstance()
+        val reminderHour = prefs.getInt(KEY_CLIENT_REMINDER_HOUR, 10).coerceIn(0, 23)
+        val reminderMinute = prefs.getInt(KEY_CLIENT_REMINDER_MINUTE, 0).coerceIn(0, 59)
+        val reminderTimeReached = nowCalendar.get(Calendar.HOUR_OF_DAY) > reminderHour ||
+            (nowCalendar.get(Calendar.HOUR_OF_DAY) == reminderHour &&
+                nowCalendar.get(Calendar.MINUTE) >= reminderMinute)
+        if (!reminderTimeReached) {
+            return
+        }
+
+        FirebaseFirestore.getInstance()
             .collection("loans")
             .whereEqualTo("userId", userId)
             .whereEqualTo("status", "active")
@@ -246,13 +275,13 @@ class LoanNotificationService : Service() {
                         val reminderKeys = listOf(
                             ReminderEntry(
                                 key = "${document.id}_${scheduleItemId}_day_before",
-                                shouldSend = isSameDay(shiftDay(dueDate, -1), Calendar.getInstance().time),
+                                shouldSend = isSameDay(shiftDay(dueDate, -1), nowCalendar.time),
                                 title = "Платёж уже завтра",
                                 body = "$loanLabel: до ${formatDate(dueDate)} нужно внести ${formatMoney(amount)}",
                             ),
                             ReminderEntry(
                                 key = "${document.id}_${scheduleItemId}_due_today",
-                                shouldSend = isSameDay(dueDate, Calendar.getInstance().time),
+                                shouldSend = isSameDay(dueDate, nowCalendar.time),
                                 title = "Сегодня срок платежа",
                                 body = "$loanLabel: сегодня нужно внести ${formatMoney(amount)}",
                             ),
@@ -272,6 +301,80 @@ class LoanNotificationService : Service() {
                 if (changed) {
                     prefs.edit().putStringSet(KEY_SENT_REMINDERS, sentReminders).apply()
                 }
+            }
+    }
+
+    private fun checkAdminLoanReminders() {
+        FirebaseFirestore.getInstance()
+            .collection("app_settings")
+            .document("payment")
+            .get()
+            .addOnSuccessListener { settingsSnapshot ->
+                val reminderHour = prefs.getInt(KEY_ADMIN_REMINDER_HOUR, 18).coerceIn(0, 23)
+                val reminderMinute = prefs.getInt(KEY_ADMIN_REMINDER_MINUTE, 0).coerceIn(0, 59)
+                val nowCalendar = Calendar.getInstance()
+                val shouldSendToday = nowCalendar.get(Calendar.HOUR_OF_DAY) > reminderHour ||
+                    (nowCalendar.get(Calendar.HOUR_OF_DAY) == reminderHour &&
+                        nowCalendar.get(Calendar.MINUTE) >= reminderMinute)
+                if (!shouldSendToday) {
+                    return@addOnSuccessListener
+                }
+
+                FirebaseFirestore.getInstance()
+                    .collection("loans")
+                    .whereEqualTo("status", "active")
+                    .get()
+                    .addOnSuccessListener { snapshot ->
+                        val sentReminders = prefs.getStringSet(KEY_SENT_REMINDERS, emptySet())
+                            ?.toMutableSet()
+                            ?: mutableSetOf()
+                        var changed = false
+                        val today = nowCalendar.time
+                        val todayStamp = buildString {
+                            append(nowCalendar.get(Calendar.YEAR))
+                            append((nowCalendar.get(Calendar.MONTH) + 1).toString().padStart(2, '0'))
+                            append(nowCalendar.get(Calendar.DAY_OF_MONTH).toString().padStart(2, '0'))
+                        }
+
+                        for (document in snapshot.documents) {
+                            val loanLabel = loanLabel(document)
+                            val schedule = document.get("schedule") as? List<*>
+                            if (schedule == null) {
+                                continue
+                            }
+
+                            for (row in schedule) {
+                                val item = row as? Map<*, *> ?: continue
+                                val isPaid = item["isPaid"] as? Boolean ?: false
+                                if (isPaid) {
+                                    continue
+                                }
+                                val dueDate = parseDueDate(item["dueDate"]) ?: continue
+                                if (!isSameDay(dueDate, today)) {
+                                    continue
+                                }
+                                val scheduleItemId = item["id"] as? String ?: continue
+                                val amount = (item["amount"] as? Number)?.toDouble() ?: 0.0
+                                val reminderKey =
+                                    "${document.id}_${scheduleItemId}_admin_due_$todayStamp"
+                                if (sentReminders.contains(reminderKey)) {
+                                    continue
+                                }
+
+                                showReminderNotification(
+                                    reminderKey,
+                                    "У клиента сегодня день платежа",
+                                    "$loanLabel: сегодня срок платежа ${formatMoney(amount)}",
+                                )
+                                sentReminders.add(reminderKey)
+                                changed = true
+                            }
+                        }
+
+                        if (changed) {
+                            prefs.edit().putStringSet(KEY_SENT_REMINDERS, sentReminders).apply()
+                        }
+                    }
             }
     }
 

@@ -1661,7 +1661,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   Future<void> _savePaymentSettings() async {
     await widget.onSavePaymentSettings(
-      PaymentSettings(
+      widget.paymentSettings.copyWith(
         bankName: _bankNameController.text.trim(),
         recipientName: _recipientNameController.text.trim(),
         recipientPhone: _recipientPhoneController.text.trim(),
@@ -1678,54 +1678,63 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Future<void> _pickClientFromContacts() async {
-    final messenger = ScaffoldMessenger.of(context);
-    final hasPermission = await FlutterContacts.requestPermission(
-      readonly: true,
-    );
-    if (!hasPermission) {
-      if (!mounted) {
-        return;
-      }
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Нужен доступ к контактам, чтобы выбрать клиента'),
-        ),
-      );
-      return;
-    }
-
     final contact = await FlutterContacts.openExternalPick();
     if (contact == null || !mounted) {
       return;
     }
 
-    final phone = contact.phones
+    final normalizedPhone = contact.phones
         .map((entry) => entry.number)
-        .map((value) => value.trim())
+        .map(_normalizeImportedPhone)
         .firstWhere(
-          (value) => Validators.phone(value) == null,
+          (value) => value.isNotEmpty && Validators.phone(value) == null,
           orElse: () => '',
         );
     final name = contact.displayName.trim();
 
     final nameError = Validators.name(name);
-    final phoneError = phone.isEmpty ? 'У контакта нет корректного номера' : null;
+    final phoneError =
+        normalizedPhone.isEmpty ? 'У контакта нет корректного номера' : null;
     if (nameError != null || phoneError != null) {
-      messenger.showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(nameError ?? phoneError!)),
       );
       return;
     }
 
-    final formattedPhone = _phoneMaskFormatter.formatEditUpdate(
-      const TextEditingValue(),
-      TextEditingValue(text: phone),
-    );
-
     setState(() {
       _clientNameController.text = name;
-      _clientPhoneController.value = formattedPhone;
+      _clientPhoneController.text =
+          _formatImportedPhone(normalizedPhone);
     });
+  }
+
+  String _normalizeImportedPhone(String rawValue) {
+    final digits = rawValue.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) {
+      return '';
+    }
+    if (digits.length == 11 && digits.startsWith('7')) {
+      return digits;
+    }
+    if (digits.length == 11 && digits.startsWith('8')) {
+      return '7${digits.substring(1)}';
+    }
+    if (digits.length == 10) {
+      return '7$digits';
+    }
+    return '';
+  }
+
+  String _formatImportedPhone(String normalizedPhone) {
+    if (normalizedPhone.length != 11 || !normalizedPhone.startsWith('7')) {
+      return normalizedPhone;
+    }
+    final digits = normalizedPhone.substring(1);
+    return '+7 (${digits.substring(0, 3)}) '
+        '${digits.substring(3, 6)}-'
+        '${digits.substring(6, 8)}-'
+        '${digits.substring(8, 10)}';
   }
 
   @override
@@ -2259,14 +2268,10 @@ class _LoanPreviewCard extends StatelessWidget {
                 label: 'Процент',
                 value: '${loan.interestPercent.toStringAsFixed(2)}%',
               ),
-                                _PreviewRow(
-                                  label: 'К возврату по плану',
-                                  value: Formatters.money(loan.plannedTotalAmount),
-                                  emphasize: true,
-                                ),
               _PreviewRow(
-                label: 'Процент за день',
-                value: Formatters.money(loan.dailyInterestAmount),
+                label: 'К возврату по плану',
+                value: Formatters.money(loan.plannedTotalAmount),
+                emphasize: true,
               ),
               _PreviewRow(
                 label: 'Пеня за день',
@@ -2400,7 +2405,11 @@ Future<void> _showAdminScheduleSheet(BuildContext context, Loan loan) async {
                         separatorBuilder: (_, _) => const SizedBox(height: 12),
                         itemBuilder: (context, index) {
                           final item = orderedSchedule[index];
-                          return _AdminScheduleCard(loan: loan, item: item);
+                          return _AdminScheduleCard(
+                            loan: loan,
+                            item: item,
+                            index: index,
+                          );
                         },
                       ),
               ),
@@ -2413,10 +2422,15 @@ Future<void> _showAdminScheduleSheet(BuildContext context, Loan loan) async {
 }
 
 class _AdminScheduleCard extends StatelessWidget {
-  const _AdminScheduleCard({required this.loan, required this.item});
+  const _AdminScheduleCard({
+    required this.loan,
+    required this.item,
+    required this.index,
+  });
 
   final Loan loan;
   final PaymentScheduleItem item;
+  final int index;
 
   @override
   Widget build(BuildContext context) {
@@ -2434,40 +2448,68 @@ class _AdminScheduleCard extends StatelessWidget {
         : Theme.of(context).colorScheme.secondary;
 
     return Card(
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-        leading: CircleAvatar(
-          backgroundColor: accentColor.withValues(alpha: 0.18),
-          child: Icon(
-            item.isPaid ? Icons.check_rounded : Icons.calendar_month_outlined,
-            color: accentColor,
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          Positioned(
+            top: 0,
+            left: 0,
+            child: Container(
+              width: 34,
+              height: 24,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: accentColor.withValues(alpha: 0.14),
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(12),
+                  bottomRight: Radius.circular(16),
+                ),
+              ),
+              child: Text(
+                '${index + 1}',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: accentColor,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
           ),
-        ),
-        title: Text(Formatters.money(totalAmount)),
-        subtitle: Text(
-          item.isPaid
-              ? 'Срок: ${Formatters.date(item.dueDate)}\n'
-                    'Оплачен ${item.paidAt == null ? '' : Formatters.date(item.paidAt!)}\n'
-                    'Процент: ${Formatters.money(interest)}\n'
-                    'Пеня: ${Formatters.money(item.penaltyAccrued)}'
-              : 'Срок: ${Formatters.date(item.dueDate)}\n'
-                    'Процент: ${Formatters.money(interest)}\n'
-                    'Пеня: ${Formatters.money(penalty)}',
-        ),
-        isThreeLine: false,
-        trailing: Text(
-          item.isPaid
-              ? 'Оплачен'
-              : isOverdue
-              ? 'Просрочен'
-              : isDueToday
-              ? 'Сегодня'
-              : 'Ожидается',
-          style: TextStyle(
-            color: accentColor,
-            fontWeight: FontWeight.w600,
+          ListTile(
+            contentPadding: const EdgeInsets.fromLTRB(18, 10, 18, 8),
+            leading: CircleAvatar(
+              backgroundColor: accentColor.withValues(alpha: 0.18),
+              child: Icon(
+                item.isPaid ? Icons.check_rounded : Icons.calendar_month_outlined,
+                color: accentColor,
+              ),
+            ),
+            title: Text(Formatters.money(totalAmount)),
+            subtitle: Text(
+              item.isPaid
+                  ? 'Срок: ${Formatters.date(item.dueDate)}\n'
+                        'Оплачен ${item.paidAt == null ? '' : Formatters.date(item.paidAt!)}\n'
+                        'Процент: ${Formatters.money(interest)}\n'
+                        'Пеня: ${Formatters.money(item.penaltyAccrued)}'
+                  : 'Срок: ${Formatters.date(item.dueDate)}\n'
+                        'Процент: ${Formatters.money(interest)}\n'
+                        'Пеня: ${Formatters.money(penalty)}',
+            ),
+            isThreeLine: false,
+            trailing: Text(
+              item.isPaid
+                  ? 'Оплачен'
+                  : isOverdue
+                  ? 'Просрочен'
+                  : isDueToday
+                  ? 'Сегодня'
+                  : 'Ожидается',
+              style: TextStyle(
+                color: accentColor,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -3386,8 +3428,8 @@ class _EditorScheduleCard extends StatelessWidget {
             top: 0,
             left: 0,
             child: Container(
-              width: 40,
-              height: 30,
+              width: 34,
+              height: 24,
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: accentColor.withValues(alpha: 0.14),
@@ -3406,11 +3448,10 @@ class _EditorScheduleCard extends StatelessWidget {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SizedBox(height: 8),
                 Row(
                   children: [
                     CircleAvatar(
@@ -3483,7 +3524,7 @@ class _EditorScheduleCard extends StatelessWidget {
                                 ),
                             ],
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 2),
                           Text(
                             'Срок: ${Formatters.date(row.dueDate)}',
                             style: Theme.of(context).textTheme.bodyMedium?.copyWith(

@@ -132,6 +132,21 @@ class LoginController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> changePassword(String password) async {
+    final user = currentUser;
+    if (user == null) {
+      return;
+    }
+    final updated = await _authRepository.changePassword(
+      user: user,
+      password: password,
+    );
+    currentUser = updated;
+    lastPasswordInput = password;
+    await _sessionService.saveLastPasswordInput(password);
+    notifyListeners();
+  }
+
   void resetLookup() {
     lookupResult = null;
     errorText = null;

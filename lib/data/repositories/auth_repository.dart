@@ -120,6 +120,15 @@ class AuthRepository {
     return updated;
   }
 
+  Future<AppUser> changePassword({
+    required AppUser user,
+    required String password,
+  }) async {
+    final updated = user.copyWith(password: password);
+    await _firestoreService.users.doc(user.id).update({'password': password});
+    return updated;
+  }
+
   Future<AppUser> signIn({
     required String phone,
     required String password,

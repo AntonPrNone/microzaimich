@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -201,6 +202,35 @@ class LocalNotificationService {
       return;
     }
     await platform.invokeMethod('openServiceNotificationSettings');
+  }
+
+  static Future<TimeOfDay> getReminderTime({required bool forAdmin}) async {
+    if (kIsWeb) {
+      return TimeOfDay(hour: forAdmin ? 18 : 10, minute: 0);
+    }
+    final data = await platform.invokeMapMethod<String, dynamic>(
+      'getReminderTime',
+      {'forAdmin': forAdmin},
+    );
+    final defaultHour = forAdmin ? 18 : 10;
+    return TimeOfDay(
+      hour: ((data?['hour'] as num?)?.toInt() ?? defaultHour).clamp(0, 23),
+      minute: ((data?['minute'] as num?)?.toInt() ?? 0).clamp(0, 59),
+    );
+  }
+
+  static Future<void> setReminderTime({
+    required bool forAdmin,
+    required TimeOfDay time,
+  }) async {
+    if (kIsWeb) {
+      return;
+    }
+    await platform.invokeMethod('setReminderTime', {
+      'forAdmin': forAdmin,
+      'hour': time.hour,
+      'minute': time.minute,
+    });
   }
 
   static Future<void> _scheduleReminder({

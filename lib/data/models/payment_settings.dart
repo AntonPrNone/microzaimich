@@ -6,6 +6,8 @@ class PaymentSettings {
     required this.recipientName,
     required this.recipientPhone,
     required this.paymentLink,
+    required this.adminDueReminderHour,
+    required this.adminDueReminderMinute,
     required this.updatedAt,
   });
 
@@ -14,12 +16,16 @@ class PaymentSettings {
         recipientName = '',
         recipientPhone = '',
         paymentLink = '',
+        adminDueReminderHour = 18,
+        adminDueReminderMinute = 0,
         updatedAt = null;
 
   final String bankName;
   final String recipientName;
   final String recipientPhone;
   final String paymentLink;
+  final int adminDueReminderHour;
+  final int adminDueReminderMinute;
   final DateTime? updatedAt;
 
   bool get hasPaymentLink => paymentLink.trim().isNotEmpty;
@@ -31,6 +37,8 @@ class PaymentSettings {
       'recipientName': recipientName.trim(),
       'recipientPhone': recipientPhone.trim(),
       'paymentLink': paymentLink.trim(),
+      'adminDueReminderHour': adminDueReminderHour,
+      'adminDueReminderMinute': adminDueReminderMinute,
       'updatedAt': updatedAt == null ? FieldValue.serverTimestamp() : Timestamp.fromDate(updatedAt!),
     };
   }
@@ -40,6 +48,8 @@ class PaymentSettings {
     String? recipientName,
     String? recipientPhone,
     String? paymentLink,
+    int? adminDueReminderHour,
+    int? adminDueReminderMinute,
     DateTime? updatedAt,
   }) {
     return PaymentSettings(
@@ -47,6 +57,9 @@ class PaymentSettings {
       recipientName: recipientName ?? this.recipientName,
       recipientPhone: recipientPhone ?? this.recipientPhone,
       paymentLink: paymentLink ?? this.paymentLink,
+      adminDueReminderHour: adminDueReminderHour ?? this.adminDueReminderHour,
+      adminDueReminderMinute:
+          adminDueReminderMinute ?? this.adminDueReminderMinute,
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }
@@ -58,6 +71,10 @@ class PaymentSettings {
       recipientName: map['recipientName'] as String? ?? '',
       recipientPhone: map['recipientPhone'] as String? ?? '',
       paymentLink: map['paymentLink'] as String? ?? '',
+      adminDueReminderHour: ((map['adminDueReminderHour'] as num?)?.toInt() ?? 18)
+          .clamp(0, 23),
+      adminDueReminderMinute:
+          ((map['adminDueReminderMinute'] as num?)?.toInt() ?? 0).clamp(0, 59),
       updatedAt: (map['updatedAt'] as Timestamp?)?.toDate(),
     );
   }

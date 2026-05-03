@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../../../core/utils/app_snackbar.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../data/models/app_user.dart';
 import '../../../../data/models/loan.dart';
@@ -39,6 +40,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
   String? _visibleDragHintLoanId;
   Set<String> _expandedBeforeDrag = <String>{};
   Timer? _dragPrepareTimer;
+  Timer? _greetingTimer;
 
   String get _prefsKey => 'expanded_loans_${widget.user.id}';
   String get _orderPrefsKey => 'loan_order_${widget.user.id}';
@@ -50,6 +52,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
     _loadExpandedState();
     _loadLoanOrder();
     _loadClosedLoansState();
+    _startGreetingTimer();
   }
 
   @override
@@ -75,7 +78,45 @@ class _ClientDashboardState extends State<ClientDashboard> {
   @override
   void dispose() {
     _dragPrepareTimer?.cancel();
+    _greetingTimer?.cancel();
     super.dispose();
+  }
+
+  void _startGreetingTimer() {
+    _greetingTimer?.cancel();
+    _greetingTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  String _greetingText() {
+    final hour = AppClock.now().hour;
+    if (hour >= 5 && hour < 12) {
+      return 'Доброе утро';
+    }
+    if (hour >= 12 && hour < 18) {
+      return 'Добрый день';
+    }
+    if (hour >= 18 && hour < 23) {
+      return 'Добрый вечер';
+    }
+    return 'Доброй ночи';
+  }
+
+  String _greetingEmoji() {
+    final hour = AppClock.now().hour;
+    if (hour >= 5 && hour < 12) {
+      return '☀️';
+    }
+    if (hour >= 12 && hour < 18) {
+      return '🌤️';
+    }
+    if (hour >= 18 && hour < 23) {
+      return '🌆';
+    }
+    return '🌙';
   }
 
   Future<void> _loadExpandedState() async {
@@ -274,7 +315,6 @@ class _ClientDashboardState extends State<ClientDashboard> {
   }
 
   Future<void> _openPaymentSheet({required Loan loan, required bool fullClose}) async {
-    final messenger = ScaffoldMessenger.of(context);
     final settings = widget.paymentSettings;
     final loanLabel = loan.displayTitle;
     final nextUnpaid = loan.nextUnpaid;
@@ -421,15 +461,18 @@ class _ClientDashboardState extends State<ClientDashboard> {
                         spacing: 12,
                         runSpacing: 12,
                         children: [
-                          if (paymentNumber.isNotEmpty)
-                            OutlinedButton.icon(
-                              onPressed: () async {
-                                await Clipboard.setData(ClipboardData(text: paymentNumber));
-                                await showCopied('Номер скопирован');
-                              },
-                              icon: const Icon(Icons.copy_all_outlined),
-                              label: const Text('Скопировать номер'),
-                            ),
+                          OutlinedButton.icon(
+                            onPressed: () async {
+                              await Clipboard.setData(
+                                ClipboardData(
+                                  text: Formatters.decimalInput(amount),
+                                ),
+                              );
+                              await showCopied('Сумма платежа скопирована');
+                            },
+                            icon: const Icon(Icons.copy_all_outlined),
+                            label: const Text('Скопировать сумму платежа'),
+                          ),
                           OutlinedButton.icon(
                             onPressed: () async {
                               await Clipboard.setData(ClipboardData(text: paymentComment));
@@ -447,11 +490,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
                                   if (!context.mounted) {
                                     return;
                                   }
-                                  messenger.showSnackBar(
-                                    const SnackBar(
-                                      content: Text('Не удалось открыть банк по ссылке'),
-                                    ),
-                                  );
+                                  showAppSnackBar('Не удалось открыть банк по ссылке');
                                 }
                               },
                               icon: const Icon(Icons.open_in_new_rounded),
@@ -537,22 +576,29 @@ class _ClientDashboardState extends State<ClientDashboard> {
           sliver: SliverToBoxAdapter(
             child: Card(
               child: Padding(
-                padding: const EdgeInsets.all(22),
+                padding: const EdgeInsets.all(18),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Здравствуйте, ${widget.user.name}',
-                      style: Theme.of(context).textTheme.headlineSmall,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${_greetingText()}, ${widget.user.name} ${_greetingEmoji()}',
+                            style: Theme.of(context).textTheme.headlineSmall,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
                     Text('Телефон: ${Formatters.phone(widget.user.phone)}'),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 14),
                     Row(
                       children: [
                         Expanded(
                           child: _MetricCard(
                             icon: Icons.layers_outlined,
+                            accentColor: const Color(0xFF8BC4FF),
                             title: 'Займы',
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -584,6 +630,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
                         Expanded(
                           child: _MetricCard(
                             icon: Icons.account_balance_wallet_outlined,
+                            accentColor: Theme.of(context).colorScheme.secondary,
                             title: 'Остаток',
                             child: activeLoans.isEmpty
                                 ? Text(
@@ -616,6 +663,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
                         Expanded(
                           child: _MetricCard(
                             icon: Icons.warning_amber_rounded,
+                            accentColor: const Color(0xFFFFC26B),
                             title: 'Пени',
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -637,6 +685,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
                         Expanded(
                           child: _MetricCard(
                             icon: Icons.event_note_outlined,
+                            accentColor: const Color(0xFF8BC4FF),
                             title: 'Платежи',
                             child: nearestPaymentDate == null
                                 ? Text(
@@ -774,6 +823,18 @@ class _ClientDashboardState extends State<ClientDashboard> {
               },
             ),
           ),
+        if (closedLoans.isNotEmpty)
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+            sliver: SliverToBoxAdapter(
+              child: Divider(
+                color: Theme.of(context).colorScheme.outlineVariant.withValues(
+                  alpha: 0.45,
+                ),
+                height: 1,
+              ),
+            ),
+          ),
         if (closedLoans.isNotEmpty) ...[
           SliverPadding(
             padding: EdgeInsets.fromLTRB(
@@ -854,34 +915,38 @@ class _ClosedLoanCard extends StatelessWidget {
     final actualStartDate = paidDates.isEmpty ? loan.issuedAt : paidDates.first;
     final actualEndDate = paidDates.isEmpty ? loan.issuedAt : paidDates.last;
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const CircleAvatar(child: Icon(Icons.check_circle_outline)),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    loan.displayTitle,
-                    style: Theme.of(context).textTheme.titleMedium,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => _showLoanScheduleSheet(context, loan),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const CircleAvatar(child: Icon(Icons.check_circle_outline)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      loan.displayTitle,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Срок займа: ${Formatters.date(firstPlannedDate)} - ${Formatters.date(lastPlannedDate)}',
-            ),
-            Text(
-              'Факт. выплата: ${Formatters.date(actualStartDate)} - ${Formatters.date(actualEndDate)}',
-            ),
-            Text('Сумма займа: ${Formatters.money(loan.principal)}'),
-                        Text('Плановая сумма к возврату: ${Formatters.money(loan.plannedTotalAmount)}'),
-            Text('Выплачено фактически: ${Formatters.money(loan.paidAmount)}'),
-          ],
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Срок займа: ${Formatters.date(firstPlannedDate)} - ${Formatters.date(lastPlannedDate)}',
+              ),
+              Text(
+                'Факт. выплата: ${Formatters.date(actualStartDate)} - ${Formatters.date(actualEndDate)}',
+              ),
+              Text('Сумма займа: ${Formatters.money(loan.principal)}'),
+              Text('Плановая сумма к возврату: ${Formatters.money(loan.plannedTotalAmount)}'),
+              Text('Выплачено фактически: ${Formatters.money(loan.paidAmount)}'),
+            ],
+          ),
         ),
       ),
     );
@@ -915,21 +980,31 @@ class _LoanCard extends StatelessWidget {
     final firstDate = loan.schedule.isEmpty ? loan.issuedAt : loan.schedule.first.dueDate;
     final lastDate = loan.schedule.isEmpty ? loan.issuedAt : loan.schedule.last.dueDate;
     final secondaryColor = Theme.of(context).colorScheme.secondary;
+    final isOverdue = loan.penaltyOutstanding > 0;
+    final statusColor = isOverdue
+        ? const Color(0xFFFFC26B)
+        : const Color(0xFF8BC4FF);
+    final statusLabel = isOverdue ? 'Просрочен' : 'В процессе';
 
     return Stack(
       children: [
-        Card(
+        Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: Card(
           clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+            side: BorderSide(color: statusColor.withValues(alpha: 0.18)),
+          ),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(22, 20, 22, 22),
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(loan.displayTitle, style: Theme.of(context).textTheme.titleLarge),
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
                 Row(
                   children: [
-                    _StatusChip(label: 'В процессе', color: const Color(0xFFFFC26B)),
                     const Spacer(),
                     if (dragIndicator != null)
                       AnimatedContainer(
@@ -982,13 +1057,16 @@ class _LoanCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 8),
-                Text(
-                  'Плановый остаток: ${Formatters.money(loan.plannedOutstandingAmount)}',
-                ),
+                Text('Сумма займа: ${Formatters.money(loan.principal)}'),
+                Text('Процент: ${Formatters.decimalInput(loan.interestPercent)}%'),
+                Text('К возврату по плану: ${Formatters.money(loan.plannedTotalAmount)}'),
+                Text('Плановый остаток: ${Formatters.money(loan.plannedOutstandingAmount)}'),
+                Text('Сейчас к закрытию: ${Formatters.money(loan.fullCloseAmount)}'),
+                Text('Пеня за день: ${Formatters.money(loan.dailyPenaltyAmount)}'),
                 Text('Срок: ${Formatters.date(firstDate)} - ${Formatters.date(lastDate)}'),
                 if (nextUnpaid != null)
                   Text('Следующий платёж: ${Formatters.date(nextUnpaid.dueDate)}'),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 InkWell(
                   onTap: () => onExpansionChanged(!isExpanded),
                   borderRadius: BorderRadius.circular(16),
@@ -1026,49 +1104,86 @@ class _LoanCard extends StatelessWidget {
                   alignment: Alignment.topCenter,
                   child: isExpanded
                       ? Padding(
-                          padding: const EdgeInsets.only(top: 18),
+                          padding: const EdgeInsets.only(top: 16),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('Сумма займа: ${Formatters.money(loan.principal)}'),
-                              Text('Процент: ${Formatters.decimalInput(loan.interestPercent)}%'),
-                              Text(
-                          'К возврату по плану: ${Formatters.money(loan.plannedTotalAmount)}',
-                              ),
-                              Text(
-                                'Сейчас к закрытию: ${Formatters.money(loan.fullCloseAmount)}',
-                              ),
-                              Text(
-                                'Процент за день: ${Formatters.money(loan.dailyInterestAmount)}',
-                              ),
-                              Text('Пеня за день: ${Formatters.money(loan.dailyPenaltyAmount)}'),
                               if ((loan.note ?? '').trim().isNotEmpty) ...[
                                 const SizedBox(height: 10),
                                 Text(loan.note!),
                               ],
                               const SizedBox(height: 18),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: ElevatedButton.icon(
-                                      onPressed: onPayNext,
-                                      icon: const Icon(Icons.payments_outlined),
-                                      label: const Text('Оплатить следующий платёж'),
-                                    ),
+                              Container(
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(18),
+                                  border: Border.all(
+                                    color: secondaryColor.withValues(alpha: 0.18),
                                   ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: OutlinedButton.icon(
-                                      onPressed: onCloseLoan,
-                                      icon: const Icon(Icons.task_alt_outlined),
-                                      label: const Text('Погасить полностью'),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: FilledButton.tonalIcon(
+                                        onPressed: onPayNext,
+                                        style: FilledButton.styleFrom(
+                                          shape: const RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.only(
+                                              topLeft: Radius.circular(18),
+                                              bottomLeft: Radius.circular(18),
+                                              topRight: Radius.circular(0),
+                                              bottomRight: Radius.circular(0),
+                                            ),
+                                          ),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 10,
+                                            vertical: 14,
+                                          ),
+                                        ),
+                                        icon: const Icon(
+                                          Icons.payments_outlined,
+                                          size: 18,
+                                        ),
+                                        label: const FittedBox(
+                                          fit: BoxFit.scaleDown,
+                                          child: Text('Следующий платёж'),
+                                        ),
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                    Container(
+                                      width: 1,
+                                      height: 48,
+                                      color: secondaryColor.withValues(alpha: 0.14),
+                                    ),
+                                    Expanded(
+                                      child: OutlinedButton.icon(
+                                        onPressed: onCloseLoan,
+                                        style: OutlinedButton.styleFrom(
+                                          shape: const RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.only(
+                                              topRight: Radius.circular(18),
+                                              bottomRight: Radius.circular(18),
+                                              topLeft: Radius.circular(0),
+                                              bottomLeft: Radius.circular(0),
+                                            ),
+                                          ),
+                                          side: BorderSide.none,
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 10,
+                                            vertical: 14,
+                                          ),
+                                        ),
+                                        icon: const Icon(
+                                          Icons.task_alt_outlined,
+                                          size: 18,
+                                        ),
+                                        label: const FittedBox(
+                                          fit: BoxFit.scaleDown,
+                                          child: Text('Погасить полностью'),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                               const SizedBox(height: 20),
                               Text(
@@ -1076,15 +1191,16 @@ class _LoanCard extends StatelessWidget {
                                 style: Theme.of(context).textTheme.titleMedium,
                               ),
                               const SizedBox(height: 12),
-                              ...loan.schedule.map(
-                                (item) => Padding(
+                              ...loan.schedule.asMap().entries.map(
+                                (entry) => Padding(
                                   padding: const EdgeInsets.only(bottom: 12),
                                   child: _ScheduleCard(
                                     loan: loan,
-                                    item: item,
-                                    isDueToday: loan.isItemDueToday(item),
-                                    isOverdue: loan.isItemOverdue(item),
-                                    penalty: loan.penaltyForItem(item),
+                                    item: entry.value,
+                                    index: entry.key,
+                                    isDueToday: loan.isItemDueToday(entry.value),
+                                    isOverdue: loan.isItemOverdue(entry.value),
+                                    penalty: loan.penaltyForItem(entry.value),
                                   ),
                                 ),
                               ),
@@ -1095,6 +1211,15 @@ class _LoanCard extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+          ),
+        ),
+        Positioned(
+          top: 0,
+          left: 18,
+          child: _StatusRibbon(
+            label: statusLabel,
+            color: statusColor,
           ),
         ),
         Positioned.fill(
@@ -1157,6 +1282,7 @@ class _ScheduleCard extends StatelessWidget {
   const _ScheduleCard({
     required this.loan,
     required this.item,
+    required this.index,
     required this.penalty,
     required this.isDueToday,
     required this.isOverdue,
@@ -1164,6 +1290,7 @@ class _ScheduleCard extends StatelessWidget {
 
   final Loan loan;
   final PaymentScheduleItem item;
+  final int index;
   final double penalty;
   final bool isDueToday;
   final bool isOverdue;
@@ -1181,40 +1308,114 @@ class _ScheduleCard extends StatelessWidget {
         : Theme.of(context).colorScheme.secondary;
 
     return Card(
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-        leading: CircleAvatar(
-          backgroundColor: accentColor.withValues(alpha: 0.18),
-          child: Icon(
-            item.isPaid ? Icons.check_rounded : Icons.calendar_month_outlined,
-            color: accentColor,
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          Positioned(
+            top: 0,
+            left: 0,
+            child: Container(
+              width: 34,
+              height: 24,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: accentColor.withValues(alpha: 0.14),
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(12),
+                  bottomRight: Radius.circular(16),
+                ),
+              ),
+              child: Text(
+                '${index + 1}',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: accentColor,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
           ),
-        ),
-        title: Text(Formatters.money(totalAmount)),
-        subtitle: Text(
-          item.isPaid
-              ? 'Срок: ${Formatters.date(item.dueDate)}\n'
-                    'Оплачен ${item.paidAt == null ? '' : Formatters.date(item.paidAt!)}\n'
-                    'Процент: ${Formatters.money(interest)}\n'
-                    'Пеня: ${Formatters.money(item.penaltyAccrued)}'
-              : 'Срок: ${Formatters.date(item.dueDate)}\n'
-                    'Процент: ${Formatters.money(interest)}\n'
-                    'Пеня: ${Formatters.money(penalty)}',
-        ),
-        isThreeLine: false,
-        trailing: Text(
-          item.isPaid
-              ? 'Оплачен'
-              : isOverdue
-              ? 'Просрочен'
-              : isDueToday
-              ? 'Сегодня'
-              : 'Ожидается',
-          style: TextStyle(color: accentColor),
-        ),
+          ListTile(
+            contentPadding: const EdgeInsets.fromLTRB(18, 10, 18, 8),
+            leading: CircleAvatar(
+              backgroundColor: accentColor.withValues(alpha: 0.18),
+              child: Icon(
+                item.isPaid ? Icons.check_rounded : Icons.calendar_month_outlined,
+                color: accentColor,
+              ),
+            ),
+            title: Text(Formatters.money(totalAmount)),
+            subtitle: Text(
+              item.isPaid
+                  ? 'Срок: ${Formatters.date(item.dueDate)}\n'
+                        'Оплачен ${item.paidAt == null ? '' : Formatters.date(item.paidAt!)}\n'
+                        'Процент: ${Formatters.money(interest)}\n'
+                        'Пеня: ${Formatters.money(item.penaltyAccrued)}'
+                  : 'Срок: ${Formatters.date(item.dueDate)}\n'
+                        'Процент: ${Formatters.money(interest)}\n'
+                        'Пеня: ${Formatters.money(penalty)}',
+            ),
+            isThreeLine: false,
+            trailing: Text(
+              item.isPaid
+                  ? 'Оплачен'
+                  : isOverdue
+                  ? 'Просрочен'
+                  : isDueToday
+                  ? 'Сегодня'
+                  : 'Ожидается',
+              style: TextStyle(color: accentColor),
+            ),
+          ),
+        ],
       ),
     );
   }
+}
+
+Future<void> _showLoanScheduleSheet(BuildContext context, Loan loan) async {
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+    builder: (sheetContext) => FractionallySizedBox(
+      heightFactor: 0.88,
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'График платежей',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 6),
+              Text(loan.displayTitle, style: Theme.of(context).textTheme.bodyMedium),
+              const SizedBox(height: 16),
+              Expanded(
+                child: ListView.separated(
+                  itemCount: loan.orderedSchedule.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 12),
+                  itemBuilder: (context, index) {
+                    final item = loan.orderedSchedule[index];
+                    return _ScheduleCard(
+                      loan: loan,
+                      item: item,
+                      index: index,
+                      isDueToday: loan.isItemDueToday(item),
+                      isOverdue: loan.isItemOverdue(item),
+                      penalty: loan.penaltyForItem(item),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 String _paymentPeriodLabel(Loan loan, PaymentScheduleItem item) {
@@ -1228,33 +1429,48 @@ String _paymentPeriodLabel(Loan loan, PaymentScheduleItem item) {
 }
 
 class _MetricCard extends StatelessWidget {
-  const _MetricCard({required this.title, required this.icon, required this.child});
+  const _MetricCard({
+    required this.title,
+    required this.icon,
+    required this.child,
+    required this.accentColor,
+  });
 
   final String title;
   final IconData icon;
   final Widget child;
+  final Color accentColor;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      constraints: const BoxConstraints(minHeight: 176),
-      padding: const EdgeInsets.all(18),
+      constraints: const BoxConstraints(minHeight: 156),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: accentColor.withValues(alpha: 0.14)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon),
-          const SizedBox(height: 14),
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: accentColor.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: accentColor, size: 19),
+          ),
+          const SizedBox(height: 12),
           Text(
             title,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.bodyMedium,
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           child,
         ],
       ),
@@ -1373,6 +1589,35 @@ class _StatusChip extends StatelessWidget {
       child: Text(
         label,
         style: TextStyle(color: color, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+}
+
+class _StatusRibbon extends StatelessWidget {
+  const _StatusRibbon({
+    required this.label,
+    required this.color,
+  });
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }
