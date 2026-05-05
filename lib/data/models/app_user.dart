@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../services/app_clock.dart';
 import 'user_role.dart';
 
 class AppUser {
@@ -52,13 +53,30 @@ class AppUser {
 
   factory AppUser.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? <String, dynamic>{};
+    return AppUser.fromMap(doc.id, data);
+  }
+
+  factory AppUser.fromMap(String id, Map<String, dynamic> data) {
     return AppUser(
-      id: doc.id,
+      id: id,
       name: data['name'] as String? ?? '',
       phone: data['phone'] as String? ?? '',
       role: UserRole.fromValue(data['role'] as String? ?? 'client'),
       password: data['password'] as String?,
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      createdAt: _readDateTime(data['createdAt']),
     );
+  }
+
+  static DateTime _readDateTime(dynamic value) {
+    if (value is Timestamp) {
+      return AppClock.toMoscow(value.toDate());
+    }
+    if (value is DateTime) {
+      return AppClock.toMoscow(value);
+    }
+    if (value is String) {
+      return AppClock.toMoscow(DateTime.parse(value));
+    }
+    return AppClock.now();
   }
 }

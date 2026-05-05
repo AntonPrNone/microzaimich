@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -21,17 +23,36 @@ class LocalNotificationService {
   static const _remindersChannelId = 'loan_reminders';
   static bool _timezoneReady = false;
 
+  static bool get _supportsAndroidNotifications =>
+      !kIsWeb && Platform.isAndroid;
+  static bool get _supportsWindowsNotifications =>
+      !kIsWeb && Platform.isWindows;
+
   static Future<void> initialize() async {
     if (kIsWeb) {
       return;
     }
+
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const initSettings = InitializationSettings(android: androidInit);
+    const windowsInit = WindowsInitializationSettings(
+      appName: 'Микрозаймич',
+      appUserModelId: 'Anton.Microzaimich.App.1',
+      guid: '4f6f0c4a-6e2b-4f36-9d83-6c1a7c3ef7f1',
+    );
+    const initSettings = InitializationSettings(
+      android: androidInit,
+      windows: windowsInit,
+    );
+
     await plugin.initialize(initSettings);
-    await plugin
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestNotificationsPermission();
+
+    if (_supportsAndroidNotifications) {
+      await plugin
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.requestNotificationsPermission();
+    }
+
     _ensureTimezones();
   }
 
@@ -53,17 +74,24 @@ class LocalNotificationService {
     required String body,
     String? payload,
   }) async {
-    if (kIsWeb) {
+    if (!_supportsAndroidNotifications && !_supportsWindowsNotifications) {
       return;
     }
-    const details = NotificationDetails(
-      android: AndroidNotificationDetails(
-        _updatesChannelId,
-        'События по займам',
-        channelDescription: 'Назначение займа, заявки на оплату и подтверждения',
-        importance: Importance.max,
-        priority: Priority.high,
-      ),
+
+    final details = NotificationDetails(
+      android: _supportsAndroidNotifications
+          ? const AndroidNotificationDetails(
+              _updatesChannelId,
+              'События по займам',
+              channelDescription:
+                  'Назначение займа и подтверждение оплаты администратором',
+              importance: Importance.max,
+              priority: Priority.high,
+            )
+          : null,
+      windows: _supportsWindowsNotifications
+          ? const WindowsNotificationDetails()
+          : null,
     );
 
     await plugin.show(
@@ -79,9 +107,10 @@ class LocalNotificationService {
     AppUser user,
     List<Loan> loans,
   ) async {
-    if (kIsWeb) {
+    if (!_supportsAndroidNotifications) {
       return;
     }
+
     _ensureTimezones();
     final prefs = await SharedPreferences.getInstance();
     final key = 'scheduled_reminders_${user.id}';
@@ -100,7 +129,8 @@ class LocalNotificationService {
           scheduleItem.dueDate.day,
           10,
         );
-        final reminderEntries = <({String suffix, DateTime date, String title, String body})>[
+        final reminderEntries =
+            <({String suffix, DateTime date, String title, String body})>[
           (
             suffix: 'day_before',
             date: dueDate.subtract(const Duration(days: 1)),
@@ -147,9 +177,10 @@ class LocalNotificationService {
   }
 
   static Future<void> clearUserReminders(String userId) async {
-    if (kIsWeb) {
+    if (!_supportsAndroidNotifications) {
       return;
     }
+
     final prefs = await SharedPreferences.getInstance();
     final key = 'scheduled_reminders_$userId';
     final ids = (prefs.getStringList(key) ?? <String>[])
@@ -169,21 +200,21 @@ class LocalNotificationService {
   }
 
   static Future<void> startBackgroundNotifications(String userId) async {
-    if (kIsWeb) {
+    if (!_supportsAndroidNotifications) {
       return;
     }
     await platform.invokeMethod('start', {'userId': userId});
   }
 
   static Future<void> stopBackgroundNotifications() async {
-    if (kIsWeb) {
+    if (!_supportsAndroidNotifications) {
       return;
     }
     await platform.invokeMethod('stop');
   }
 
   static Future<void> clearReminderCache() async {
-    if (kIsWeb) {
+    if (!_supportsAndroidNotifications) {
       return;
     }
     try {
@@ -194,14 +225,14 @@ class LocalNotificationService {
   }
 
   static Future<bool> isRunning() async {
-    if (kIsWeb) {
+    if (!_supportsAndroidNotifications) {
       return false;
     }
     return await platform.invokeMethod<bool>('isRunning') ?? false;
   }
 
   static Future<bool> isServiceNotificationEnabled() async {
-    if (kIsWeb) {
+    if (!_supportsAndroidNotifications) {
       return false;
     }
     return await platform.invokeMethod<bool>('isServiceNotificationEnabled') ??
@@ -209,14 +240,14 @@ class LocalNotificationService {
   }
 
   static Future<void> openServiceNotificationSettings() async {
-    if (kIsWeb) {
+    if (!_supportsAndroidNotifications) {
       return;
     }
     await platform.invokeMethod('openServiceNotificationSettings');
   }
 
   static Future<TimeOfDay> getReminderTime({required bool forAdmin}) async {
-    if (kIsWeb) {
+    if (!_supportsAndroidNotifications) {
       return TimeOfDay(hour: forAdmin ? 18 : 10, minute: 0);
     }
     final data = await platform.invokeMapMethod<String, dynamic>(
@@ -234,7 +265,7 @@ class LocalNotificationService {
     required bool forAdmin,
     required TimeOfDay time,
   }) async {
-    if (kIsWeb) {
+    if (!_supportsAndroidNotifications) {
       return;
     }
     await platform.invokeMethod('setReminderTime', {
@@ -251,9 +282,10 @@ class LocalNotificationService {
     required tz.TZDateTime scheduledAt,
     required String payload,
   }) async {
-    if (kIsWeb) {
+    if (!_supportsAndroidNotifications) {
       return;
     }
+
     const details = NotificationDetails(
       android: AndroidNotificationDetails(
         _remindersChannelId,

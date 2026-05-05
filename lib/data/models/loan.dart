@@ -18,6 +18,8 @@ class Loan {
     required this.issuedAt,
     required this.schedule,
     required this.status,
+    this.paymentIntervalCount = 0,
+    this.paymentIntervalUnit = '',
     this.note,
   });
 
@@ -31,6 +33,8 @@ class Loan {
   final DateTime issuedAt;
   final List<PaymentScheduleItem> schedule;
   final String status;
+  final int paymentIntervalCount;
+  final String paymentIntervalUnit;
   final String? note;
 
   List<PaymentScheduleItem> get orderedSchedule =>
@@ -147,6 +151,9 @@ class Loan {
 
   double get interestOutstanding => accrualSnapshot().interestOutstanding;
 
+  double interestOutstandingAt(DateTime at) =>
+      accrualSnapshot(at: at).interestOutstanding;
+
   double get penaltyOutstanding => accrualSnapshot().penaltyOutstanding;
 
   double get chargesOutstanding => accrualSnapshot().chargesOutstanding;
@@ -157,13 +164,23 @@ class Loan {
   double get paidAmount =>
       Formatters.cents(principalPaid + interestPaid + penaltyPaid);
 
-  double get plannedPaidAmount =>
-      Formatters.cents(principalPaid + interestPaid);
+  double get plannedPaidAmount => Formatters.cents(
+    orderedSchedule
+        .where((item) => item.isPaid)
+        .fold<double>(
+          0,
+          (runningTotal, item) => runningTotal + plannedAmountForItem(item),
+        ),
+  );
 
-  double get plannedOutstandingAmount =>
-      Formatters.centsUp(
-        math.max(plannedTotalAmount - plannedPaidAmount, 0) + penaltyOutstanding,
-      );
+  double get plannedOutstandingAmount {
+    if (orderedSchedule.every((item) => item.isPaid)) {
+      return 0;
+    }
+    return Formatters.centsUp(
+      math.max(plannedTotalAmount - plannedPaidAmount, 0) + penaltyOutstanding,
+    );
+  }
 
   PaymentScheduleItem? get nextUnpaid {
     for (final item in orderedSchedule) {
@@ -228,24 +245,20 @@ class Loan {
     if (item.isPaid) {
       return Formatters.centsUp(_interestPaidForItem(item));
     }
-    final next = nextUnpaid;
-    if (next != null && next.id == item.id) {
-      return Formatters.centsUp(accrualSnapshot(at: at).interestOutstanding);
-    }
     return plannedInterestForItem(item);
   }
 
   double amountForItem(PaymentScheduleItem item, {DateTime? at}) {
-    if (!item.isPaid) {
-      final next = nextUnpaid;
-      if (next == null || next.id != item.id) {
-        return plannedAmountForItem(item);
-      }
+    if (item.isPaid) {
+      return Formatters.centsUp(
+        principalAmountForItem(item) +
+            interestForItem(item, at: at) +
+            penaltyForItem(item, at: at),
+      );
     }
-    final principalPart = principalAmountForItem(item);
-    final interestPart = interestForItem(item, at: at);
-    final penaltyPart = penaltyForItem(item, at: at);
-    return Formatters.centsUp(principalPart + interestPart + penaltyPart);
+    return Formatters.centsUp(
+      plannedAmountForItem(item) + penaltyForItem(item, at: at),
+    );
   }
 
   double penaltyForItem(PaymentScheduleItem item, {DateTime? at}) {
@@ -286,6 +299,8 @@ class Loan {
       'dailyPenaltyAmount': dailyPenaltyAmount,
       'issuedAt': Timestamp.fromDate(issuedAt),
       'status': status,
+      'paymentIntervalCount': paymentIntervalCount,
+      'paymentIntervalUnit': paymentIntervalUnit,
       'note': note,
       'schedule': orderedSchedule.map((item) => item.toMap()).toList(),
     };
@@ -302,6 +317,8 @@ class Loan {
     DateTime? issuedAt,
     List<PaymentScheduleItem>? schedule,
     String? status,
+    int? paymentIntervalCount,
+    String? paymentIntervalUnit,
     String? note,
   }) {
     return Loan(
@@ -315,12 +332,18 @@ class Loan {
       issuedAt: issuedAt ?? this.issuedAt,
       schedule: schedule ?? this.schedule,
       status: status ?? this.status,
+      paymentIntervalCount: paymentIntervalCount ?? this.paymentIntervalCount,
+      paymentIntervalUnit: paymentIntervalUnit ?? this.paymentIntervalUnit,
       note: note ?? this.note,
     );
   }
 
   factory Loan.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? <String, dynamic>{};
+    return Loan.fromMap(doc.id, data);
+  }
+
+  factory Loan.fromMap(String id, Map<String, dynamic> data) {
     final schedule =
         (data['schedule'] as List<dynamic>? ?? [])
             .whereType<Map<String, dynamic>>()
@@ -329,20 +352,33 @@ class Loan {
           ..sort((a, b) => a.dueDate.compareTo(b.dueDate));
 
     return Loan(
-      id: doc.id,
+      id: id,
       userId: data['userId'] as String? ?? '',
       title: data['title'] as String? ?? '',
       principal: (data['principal'] as num?)?.toDouble() ?? 0,
       interestPercent: (data['interestPercent'] as num?)?.toDouble() ?? 0,
       totalAmount: (data['totalAmount'] as num?)?.toDouble() ?? 0,
       dailyPenaltyAmount: (data['dailyPenaltyAmount'] as num?)?.toDouble() ?? 0,
-      issuedAt: (data['issuedAt'] as Timestamp?)?.toDate() == null
-          ? AppClock.now()
-          : AppClock.toMoscow((data['issuedAt'] as Timestamp).toDate()),
+      issuedAt: _readDateTime(data['issuedAt']),
       schedule: schedule,
       status: data['status'] as String? ?? 'active',
+      paymentIntervalCount: (data['paymentIntervalCount'] as num?)?.toInt() ?? 0,
+      paymentIntervalUnit: data['paymentIntervalUnit'] as String? ?? '',
       note: data['note'] as String?,
     );
+  }
+
+  static DateTime _readDateTime(dynamic value) {
+    if (value is Timestamp) {
+      return AppClock.toMoscow(value.toDate());
+    }
+    if (value is DateTime) {
+      return AppClock.toMoscow(value);
+    }
+    if (value is String) {
+      return AppClock.toMoscow(DateTime.parse(value));
+    }
+    return AppClock.now();
   }
 
   bool _isItemOverdueOnDate(PaymentScheduleItem item, DateTime date) {

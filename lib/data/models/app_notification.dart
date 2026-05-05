@@ -42,8 +42,12 @@ class AppNotification {
 
   factory AppNotification.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? <String, dynamic>{};
+    return AppNotification.fromMap(doc.id, data);
+  }
+
+  factory AppNotification.fromMap(String id, Map<String, dynamic> data) {
     return AppNotification(
-      id: doc.id,
+      id: id,
       userId: data['userId'] as String? ?? '',
       title: data['title'] as String? ?? '',
       body: data['body'] as String? ?? '',
@@ -51,12 +55,21 @@ class AppNotification {
         (value) => value.name == (data['type'] as String? ?? ''),
         orElse: () => AppNotificationType.paymentReminder,
       ),
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate() == null
-          ? AppClock.now()
-          : AppClock.toMoscow((data['createdAt'] as Timestamp).toDate()),
-      readAt: (data['readAt'] as Timestamp?)?.toDate() == null
-          ? null
-          : AppClock.toMoscow((data['readAt'] as Timestamp).toDate()),
+      createdAt: _readDateTime(data['createdAt']) ?? AppClock.now(),
+      readAt: _readDateTime(data['readAt']),
     );
+  }
+
+  static DateTime? _readDateTime(dynamic value) {
+    if (value is Timestamp) {
+      return AppClock.toMoscow(value.toDate());
+    }
+    if (value is DateTime) {
+      return AppClock.toMoscow(value);
+    }
+    if (value is String && value.isNotEmpty) {
+      return AppClock.toMoscow(DateTime.parse(value));
+    }
+    return null;
   }
 }

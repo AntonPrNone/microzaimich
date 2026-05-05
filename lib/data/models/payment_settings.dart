@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../services/app_clock.dart';
+
 class PaymentSettings {
   const PaymentSettings({
     required this.bankName,
@@ -75,7 +77,9 @@ class PaymentSettings {
           .clamp(0, 23),
       adminDueReminderMinute:
           ((map['adminDueReminderMinute'] as num?)?.toInt() ?? 0).clamp(0, 59),
-      updatedAt: (map['updatedAt'] as Timestamp?)?.toDate(),
+      updatedAt: (map['updatedAt'] as Timestamp?)?.toDate() == null
+          ? null
+          : AppClock.toMoscow((map['updatedAt'] as Timestamp).toDate()),
     );
   }
 }

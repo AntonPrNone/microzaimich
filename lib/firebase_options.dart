@@ -83,4 +83,5 @@ class DefaultFirebaseOptions {
     authDomain: 'microzaimich.firebaseapp.com',
     storageBucket: 'microzaimich.firebasestorage.app',
   );
+
 }

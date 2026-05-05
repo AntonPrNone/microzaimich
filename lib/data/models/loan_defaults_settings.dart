@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../services/app_clock.dart';
+
 class LoanDefaultsSettings {
   const LoanDefaultsSettings({
     required this.principal,
@@ -51,7 +53,9 @@ class LoanDefaultsSettings {
       paymentCount: (map['paymentCount'] as num?)?.toInt() ?? 6,
       paymentIntervalCount: (map['paymentIntervalCount'] as num?)?.toInt() ?? 1,
       paymentIntervalUnit: map['paymentIntervalUnit'] as String? ?? 'months',
-      updatedAt: (map['updatedAt'] as Timestamp?)?.toDate(),
+      updatedAt: (map['updatedAt'] as Timestamp?)?.toDate() == null
+          ? null
+          : AppClock.toMoscow((map['updatedAt'] as Timestamp).toDate()),
     );
   }
 }

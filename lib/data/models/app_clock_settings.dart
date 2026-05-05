@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../services/app_clock.dart';
+
 class AppClockSettings {
   const AppClockSettings({
     required this.debugEnabled,
@@ -30,8 +32,12 @@ class AppClockSettings {
     final map = data ?? <String, dynamic>{};
     return AppClockSettings(
       debugEnabled: map['debugEnabled'] as bool? ?? false,
-      debugNow: (map['debugNow'] as Timestamp?)?.toDate(),
-      updatedAt: (map['updatedAt'] as Timestamp?)?.toDate(),
+      debugNow: (map['debugNow'] as Timestamp?)?.toDate() == null
+          ? null
+          : AppClock.toMoscow((map['debugNow'] as Timestamp).toDate()),
+      updatedAt: (map['updatedAt'] as Timestamp?)?.toDate() == null
+          ? null
+          : AppClock.toMoscow((map['updatedAt'] as Timestamp).toDate()),
     );
   }
 }

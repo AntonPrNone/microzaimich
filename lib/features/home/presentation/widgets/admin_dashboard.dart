@@ -1,6 +1,7 @@
 ﻿import 'dart:async';
 
 import 'dart:math' as math;
+import 'dart:io' show Platform;
 
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:flutter/material.dart';
@@ -39,6 +40,7 @@ class AdminClientsTab extends StatefulWidget {
     required this.hideClosedLoans,
     required this.watchLoansForUser,
     required this.onEditLoan,
+    required this.onCloseLoan,
     required this.onDeleteLoan,
   });
 
@@ -48,6 +50,7 @@ class AdminClientsTab extends StatefulWidget {
   final bool hideClosedLoans;
   final Stream<List<Loan>> Function(String userId) watchLoansForUser;
   final Future<void> Function(Loan loan) onEditLoan;
+  final Future<void> Function(Loan loan, {DateTime? paidAt}) onCloseLoan;
   final Future<void> Function(Loan loan) onDeleteLoan;
 
   @override
@@ -258,6 +261,7 @@ class _AdminClientsTabState extends State<AdminClientsTab> {
                                   client: client,
                                   loanStream: widget.watchLoansForUser(client.id),
                                   onEditLoan: widget.onEditLoan,
+                                  onCloseLoan: widget.onCloseLoan,
                                   onDeleteLoan: widget.onDeleteLoan,
                                 ),
                               );
@@ -808,12 +812,14 @@ class _ClientLoansSheet extends StatefulWidget {
     required this.client,
     required this.loanStream,
     required this.onEditLoan,
+    required this.onCloseLoan,
     required this.onDeleteLoan,
   });
 
   final AppUser client;
   final Stream<List<Loan>> loanStream;
   final Future<void> Function(Loan loan) onEditLoan;
+  final Future<void> Function(Loan loan, {DateTime? paidAt}) onCloseLoan;
   final Future<void> Function(Loan loan) onDeleteLoan;
 
   @override
@@ -1105,6 +1111,38 @@ class _ClientLoansSheetState extends State<_ClientLoansSheet> {
     ).showSnackBar(SnackBar(content: Text('Займ "${loan.displayTitle}" удалён')));
   }
 
+  Future<void> _confirmCloseLoan(Loan loan) async {
+    if (loan.status == 'closed') {
+      return;
+    }
+
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: AppClock.now(),
+      firstDate: DateTime(loan.issuedAt.year, loan.issuedAt.month, loan.issuedAt.day),
+      lastDate: DateTime(2100),
+      locale: const Locale('ru', 'RU'),
+    );
+
+    if (pickedDate == null || !mounted) {
+      return;
+    }
+
+    await widget.onCloseLoan(loan, paidAt: pickedDate);
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Займ "${loan.displayTitle}" погашен полностью от ${Formatters.date(pickedDate)}',
+        ),
+      ),
+    );
+  }
+
   List<int> _visibleIndicatorIndexes(int maxVisible, int totalLoans) {
     if (totalLoans == 0) {
       return const [];
@@ -1216,6 +1254,7 @@ class _ClientLoansSheetState extends State<_ClientLoansSheet> {
                                     child: _LoanPreviewCard(
                                       loan: loan,
                                       onEdit: () => widget.onEditLoan(loan),
+                                      onClose: () => _confirmCloseLoan(loan),
                                       onDelete: () => _confirmDeleteLoan(loan),
                                     ),
                                   ),
@@ -1378,6 +1417,8 @@ class AdminDashboard extends StatefulWidget {
     required double dailyPenaltyAmount,
     required DateTime issuedAt,
     required List<PaymentScheduleItem> schedule,
+    required int paymentIntervalCount,
+    required String paymentIntervalUnit,
     String? note,
   })
   onIssueLoan;
@@ -1472,8 +1513,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
                             title: Text(client.name),
                             subtitle: Text(
-                              '${Formatters.phone(client.phone)} • Займов: $loansCount',
+                              '${Formatters.phone(client.phone)} • Займов: $loansCount\n'
+                              'Профиль создан: ${Formatters.dateTime(client.createdAt)}',
                             ),
+                            isThreeLine: true,
                             onChanged: (value) {
                               setSheetState(() {
                                 if (value ?? false) {
@@ -1605,12 +1648,46 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Future<void> _pickClientFromContacts() async {
-    try {
-      final contact = await FlutterContacts.openExternalPick();
+    if (!Platform.isAndroid && !Platform.isIOS) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Импорт контактов доступен только на телефоне'),
+        ),
+      );
+      return;
+    }
 
-      if (contact == null || !mounted) {
+    try {
+      final hasPermission = await FlutterContacts.requestPermission(
+        readonly: true,
+      );
+      if (!hasPermission) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Нужен доступ к контактам, чтобы импортировать клиента'),
+          ),
+        );
         return;
       }
+
+      final pickedContact = await FlutterContacts.openExternalPick();
+
+      if (pickedContact == null || !mounted) {
+        return;
+      }
+
+      final contact =
+          pickedContact.phones.isNotEmpty
+              ? pickedContact
+              : await FlutterContacts.getContact(
+                    pickedContact.id,
+                    withProperties: true,
+                    withPhoto: false,
+                    withThumbnail: false,
+                  ) ??
+                  pickedContact;
 
       final normalizedPhone = contact.phones
           .map((entry) => entry.number)
@@ -1620,7 +1697,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             orElse: () => '',
           );
 
-      final name = contact.displayName.trim();
+      final name = _extractImportedContactName(contact);
 
       final nameError = Validators.name(name);
       final phoneError = normalizedPhone.isEmpty ? 'У контакта нет корректного номера' : null;
@@ -1647,9 +1724,19 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
       if (!mounted) return;
 
+      final message = (e.message ?? '').toLowerCase();
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Не удалось открыть контакты')));
+      ).showSnackBar(
+        SnackBar(
+          content: Text(
+            e.code.toLowerCase().contains('permission') ||
+                    message.contains('permission')
+                ? 'Нужен доступ к контактам, чтобы импортировать клиента'
+                : 'Не удалось открыть контакты',
+          ),
+        ),
+      );
     } catch (e, st) {
       debugPrint('Ошибка выбора контакта: $e');
       debugPrintStack(stackTrace: st);
@@ -1674,6 +1761,25 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
 
     return digits;
+  }
+
+  String _extractImportedContactName(Contact contact) {
+    final displayName = contact.displayName.trim();
+    if (displayName.isNotEmpty) {
+      return displayName;
+    }
+
+    final parts = [
+      contact.name.first.trim(),
+      contact.name.middle.trim(),
+      contact.name.last.trim(),
+    ].where((part) => part.isNotEmpty).toList();
+
+    if (parts.isNotEmpty) {
+      return parts.join(' ');
+    }
+
+    return '';
   }
 
   String _formatImportedPhone(String value) {
@@ -2124,11 +2230,13 @@ class _LoanPreviewCard extends StatelessWidget {
   const _LoanPreviewCard({
     required this.loan,
     required this.onEdit,
+    required this.onClose,
     required this.onDelete,
   });
 
   final Loan loan;
   final VoidCallback onEdit;
+  final VoidCallback onClose;
   final VoidCallback onDelete;
 
   @override
@@ -2221,41 +2329,87 @@ class _LoanPreviewCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          Row(
+          Column(
             children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _showAdminScheduleSheet(context, loan),
-                  icon: const Icon(Icons.calendar_view_month_rounded),
-                  label: const Text('График', maxLines: 1, overflow: TextOverflow.ellipsis),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: onEdit,
-                  icon: const Icon(Icons.edit_outlined),
-                  label: const Text('Ред. займ', maxLines: 1, overflow: TextOverflow.ellipsis),
-                ),
-              ),
-              const SizedBox(width: 12),
-              SizedBox(
-                width: 52,
-                child: OutlinedButton(
-                  onPressed: onDelete,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFFFF8A80),
-                    side: const BorderSide(color: Color(0x33FF8A80)),
-                    padding: EdgeInsets.zero,
-                    minimumSize: const Size(52, 40),
+              Row(
+                children: [
+                  Expanded(
+                    child: _LoanActionButton(
+                      icon: Icons.calendar_view_month_rounded,
+                      label: 'График',
+                      onPressed: () => _showAdminScheduleSheet(context, loan),
+                    ),
                   ),
-                  child: const Icon(Icons.delete_outline_rounded),
-                ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _LoanActionButton(
+                      icon: Icons.edit_outlined,
+                      label: 'Ред. займ',
+                      onPressed: onEdit,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: _LoanActionButton(
+                      icon: isClosed
+                          ? Icons.delete_outline_rounded
+                          : Icons.task_alt_outlined,
+                      label: isClosed ? 'Удалить' : 'Погасить',
+                      onPressed: isClosed ? onDelete : onClose,
+                      danger: isClosed ? true : false,
+                    ),
+                  ),
+                  if (!isClosed) ...[
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _LoanActionButton(
+                        icon: Icons.delete_outline_rounded,
+                        label: 'Удалить',
+                        onPressed: onDelete,
+                        danger: true,
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ],
           ),
         ],
       ),
+    );
+  }
+}
+
+class _LoanActionButton extends StatelessWidget {
+  const _LoanActionButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+    this.danger = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onPressed;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = danger ? const Color(0xFFFF8A80) : null;
+    final side = danger ? const BorderSide(color: Color(0x33FF8A80)) : null;
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: foreground,
+        side: side,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+      ),
+      icon: Icon(icon, size: 18),
+      label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
     );
   }
 }
@@ -2425,6 +2579,8 @@ class LoanEditorSheet extends StatefulWidget {
     required double dailyPenaltyAmount,
     required DateTime issuedAt,
     required List<PaymentScheduleItem> schedule,
+    required int paymentIntervalCount,
+    required String paymentIntervalUnit,
     String? note,
   })
   onCreate;
@@ -2486,9 +2642,14 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
       _dailyPenaltyController.text = Formatters.decimalInput(loan.dailyPenaltyAmount);
       _titleController.text = loan.displayTitle;
       _monthsController.text = loan.schedule.length.toString();
-      final inferredInterval = _inferInterval(loan);
-      _intervalCountController.text = inferredInterval.count.toString();
-      _intervalUnit = inferredInterval.unit;
+      if (loan.paymentIntervalCount > 0 && loan.paymentIntervalUnit.isNotEmpty) {
+        _intervalCountController.text = loan.paymentIntervalCount.toString();
+        _intervalUnit = _PaymentIntervalUnitX.fromStorage(loan.paymentIntervalUnit);
+      } else {
+        final inferredInterval = _inferInterval(loan);
+        _intervalCountController.text = inferredInterval.count.toString();
+        _intervalUnit = inferredInterval.unit;
+      }
       _noteController.text = loan.note ?? '';
       _scheduleRows = loan.schedule
           .map(
@@ -2631,7 +2792,9 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
             isPaid: plannedOnly ? false : row.isPaid,
             penaltyAccrued: plannedOnly ? 0 : row.penaltyAccrued,
             interestAccruedPaid: plannedOnly ? 0 : row.interestAccruedPaid,
-            paidAt: plannedOnly ? null : row.paidAt,
+            paidAt: plannedOnly
+                ? null
+                : (row.paidAt == null ? null : AppClock.fromMoscowWallClock(row.paidAt!)),
           ),
         )
         .toList();
@@ -2646,6 +2809,8 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
       issuedAt: AppClock.fromMoscowWallClock(_issuedAt),
       schedule: draftSchedule,
       status: effectiveRows.every((item) => item.isPaid) ? 'closed' : 'active',
+      paymentIntervalCount: _intervalCount,
+      paymentIntervalUnit: _intervalUnit.storageValue,
       note: _noteController.text.trim().isEmpty ? null : _noteController.text.trim(),
     );
     final hydratedSchedule = preview.orderedSchedule
@@ -2719,21 +2884,20 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
   }
 
   void _setPaidFromIndexWithDate(int index, bool isPaid, {required DateTime paidAt}) {
-    final paidAtStorage = AppClock.fromMoscowWallClock(paidAt);
+    final previewLoan = _editorPlannedPreviewLoan;
     for (var itemIndex = 0; itemIndex < _scheduleRows.length; itemIndex++) {
       final row = _scheduleRows[itemIndex];
       if (isPaid) {
         if (itemIndex <= index) {
           if (!row.isPaid) {
-            final previewLoan = _buildEditorPreviewLoan();
             final item = previewLoan.orderedSchedule.firstWhere(
               (scheduleItem) => scheduleItem.id == row.id,
             );
-            row.interestAccruedPaid = previewLoan.interestForItem(item);
-            row.penaltyAccrued = previewLoan.penaltyForItem(item);
+            row.interestAccruedPaid = previewLoan.plannedInterestForItem(item);
+            row.penaltyAccrued = previewLoan.penaltyForItem(item, at: paidAt);
           }
           row.isPaid = true;
-          row.paidAt = paidAtStorage;
+          row.paidAt = paidAt;
         }
         continue;
       }
@@ -2759,7 +2923,7 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
           continue;
         }
         final previewItem = previewItemsById[row.id];
-        row.paidAt = AppClock.fromMoscowWallClock(row.dueDate);
+        row.paidAt = row.dueDate;
         row.penaltyAccrued = 0;
         row.interestAccruedPaid = previewItem == null
             ? 0
@@ -2778,7 +2942,7 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
       for (final row in _scheduleRows) {
         final previewItem = previewItemsById[row.id];
         row.isPaid = true;
-        row.paidAt = AppClock.fromMoscowWallClock(row.dueDate);
+        row.paidAt = row.dueDate;
         row.penaltyAccrued = 0;
         row.interestAccruedPaid = previewItem == null
             ? 0
@@ -2853,7 +3017,7 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
 
   Future<void> _pickPaymentDate(int index, {required bool markPaid}) async {
     final row = _scheduleRows[index];
-    final initialDate = markPaid ? AppClock.now() : (row.paidAt ?? AppClock.now());
+    final initialDate = markPaid ? AppClock.now() : (row.paidAt ?? row.dueDate);
     final firstDate = _issuedAt;
     final pickedDate = await showDatePicker(
       context: context,
@@ -2869,7 +3033,7 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
       if (markPaid) {
         _setPaidFromIndexWithDate(index, true, paidAt: pickedDate);
       } else {
-        _scheduleRows[index].paidAt = AppClock.fromMoscowWallClock(pickedDate);
+        _scheduleRows[index].paidAt = pickedDate;
       }
     });
   }
@@ -2913,7 +3077,9 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
           isPaid: row.isPaid,
           penaltyAccrued: row.penaltyAccrued,
           interestAccruedPaid: row.interestAccruedPaid,
-          paidAt: row.isPaid ? row.paidAt ?? AppClock.nowForStorage() : null,
+          paidAt: row.isPaid
+              ? AppClock.fromMoscowWallClock(row.paidAt ?? AppClock.now())
+              : null,
         ),
       );
     }
@@ -2933,6 +3099,8 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
         dailyPenaltyAmount: dailyPenalty,
         issuedAt: AppClock.fromMoscowWallClock(_issuedAt),
         schedule: schedule,
+        paymentIntervalCount: _intervalCount,
+        paymentIntervalUnit: _intervalUnit.storageValue,
         note: _noteController.text.trim(),
       );
     } else {
@@ -2948,6 +3116,8 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
           dailyPenaltyAmount: dailyPenalty,
           issuedAt: AppClock.fromMoscowWallClock(_issuedAt),
           schedule: schedule,
+          paymentIntervalCount: _intervalCount,
+          paymentIntervalUnit: _intervalUnit.storageValue,
           note: _noteController.text.trim(),
           status: schedule.every((item) => item.isPaid) ? 'closed' : 'active',
         ),
@@ -3581,6 +3751,12 @@ extension _PaymentIntervalUnitX on _PaymentIntervalUnit {
       _ => _PaymentIntervalUnit.months,
     };
   }
+
+  String get storageValue => switch (this) {
+    _PaymentIntervalUnit.days => 'days',
+    _PaymentIntervalUnit.weeks => 'weeks',
+    _PaymentIntervalUnit.months => 'months',
+  };
 }
 
 class _PaymentIntervalValue {

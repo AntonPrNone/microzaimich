@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io' show Platform;
+
 import '../models/app_notification.dart';
 import '../services/app_clock.dart';
 import '../models/user_role.dart';
@@ -11,6 +14,43 @@ class NotificationRepository {
   final FirestoreService _firestoreService;
 
   Stream<List<AppNotification>> watchForUser(String userId) {
+    if (Platform.isWindows) {
+      return Stream.multi((controller) {
+        Timer? timer;
+        var active = true;
+
+        Future<void> emit() async {
+          try {
+            final docs = await _firestoreService.windowsRest!.listDocuments(
+              'notifications',
+            );
+            final notifications = docs
+                .map((doc) => AppNotification.fromMap(doc.id, doc.data))
+                .where((notification) => notification.userId == userId)
+                .toList()
+              ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+            if (active) {
+              controller.add(notifications);
+            }
+          } catch (error, stackTrace) {
+            if (active) {
+              controller.addError(error, stackTrace);
+            }
+          }
+        }
+
+        unawaited(emit());
+        timer = Timer.periodic(
+          const Duration(seconds: 2),
+          (_) => unawaited(emit()),
+        );
+        controller.onCancel = () {
+          active = false;
+          timer?.cancel();
+        };
+      });
+    }
+
     return _firestoreService.notifications
         .where('userId', isEqualTo: userId)
         .snapshots()
@@ -28,6 +68,18 @@ class NotificationRepository {
     required String body,
     required AppNotificationType type,
   }) async {
+    if (Platform.isWindows) {
+      await _firestoreService.windowsRest!.createDocument('notifications', {
+        'userId': userId,
+        'title': title,
+        'body': body,
+        'type': type.name,
+        'createdAt': AppClock.nowForStorage(),
+        'readAt': null,
+      });
+      return;
+    }
+
     final ref = _firestoreService.notifications.doc();
     final notification = AppNotification(
       id: ref.id,
@@ -45,6 +97,21 @@ class NotificationRepository {
     required String body,
     required AppNotificationType type,
   }) async {
+    if (Platform.isWindows) {
+      final admins = await _firestoreService.windowsRest!.listDocuments('users');
+      for (final admin in admins.where(
+        (doc) => doc.data['role'] == UserRole.admin.value,
+      )) {
+        await notifyUser(
+          userId: admin.id,
+          title: title,
+          body: body,
+          type: type,
+        );
+      }
+      return;
+    }
+
     final adminsSnapshot = await _firestoreService.users
         .where('role', isEqualTo: UserRole.admin.value)
         .get();
@@ -59,12 +126,36 @@ class NotificationRepository {
   }
 
   Future<void> markAsRead(String notificationId) async {
+    if (Platform.isWindows) {
+      await _firestoreService.windowsRest!.updateDocument(
+        'notifications/$notificationId',
+        {
+          'readAt': AppClock.nowForStorage(),
+        },
+      );
+      return;
+    }
     await _firestoreService.notifications.doc(notificationId).update({
       'readAt': AppClock.nowForStorage(),
     });
   }
 
   Future<void> markAllAsRead(String userId) async {
+    if (Platform.isWindows) {
+      final docs = await _firestoreService.windowsRest!.listDocuments(
+        'notifications',
+      );
+      for (final doc in docs.where(
+        (doc) => doc.data['userId'] == userId && doc.data['readAt'] == null,
+      )) {
+        await _firestoreService.windowsRest!.updateDocument(
+          'notifications/${doc.id}',
+          {'readAt': AppClock.nowForStorage()},
+        );
+      }
+      return;
+    }
+
     final snapshot = await _firestoreService.notifications
         .where('userId', isEqualTo: userId)
         .where('readAt', isNull: true)
@@ -75,6 +166,18 @@ class NotificationRepository {
   }
 
   Future<void> deleteForUser(String userId) async {
+    if (Platform.isWindows) {
+      final docs = await _firestoreService.windowsRest!.listDocuments(
+        'notifications',
+      );
+      for (final doc in docs.where((doc) => doc.data['userId'] == userId)) {
+        await _firestoreService.windowsRest!.deleteDocument(
+          'notifications/${doc.id}',
+        );
+      }
+      return;
+    }
+
     final snapshot = await _firestoreService.notifications
         .where('userId', isEqualTo: userId)
         .get();

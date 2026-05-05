@@ -263,6 +263,8 @@ class _AdminHomeState extends State<_AdminHome> {
           required double dailyPenaltyAmount,
           required DateTime issuedAt,
           required List<PaymentScheduleItem> schedule,
+          required int paymentIntervalCount,
+          required String paymentIntervalUnit,
           String? note,
         }) async {
           await widget.loanRepository.createLoan(
@@ -274,6 +276,8 @@ class _AdminHomeState extends State<_AdminHome> {
             dailyPenaltyAmount: dailyPenaltyAmount,
             issuedAt: issuedAt,
             schedule: schedule,
+            paymentIntervalCount: paymentIntervalCount,
+            paymentIntervalUnit: paymentIntervalUnit,
             note: note,
           );
         },
@@ -417,6 +421,10 @@ class _AdminHomeState extends State<_AdminHome> {
                                         loan,
                                         loanDefaults,
                                       ),
+                                      onCloseLoan: (
+                                        Loan loan, {
+                                        DateTime? paidAt,
+                                      }) => widget.loanRepository.closeLoan(loan, paidAt: paidAt),
                                       onDeleteLoan: (loan) =>
                                           widget.loanRepository.deleteLoan(loan.id),
                                     ),
@@ -454,6 +462,8 @@ class _AdminHomeState extends State<_AdminHome> {
                                         required DateTime issuedAt,
                                         required List<PaymentScheduleItem>
                                             schedule,
+                                        required int paymentIntervalCount,
+                                        required String paymentIntervalUnit,
                                         String? note,
                                       }) async {
                                         await widget.loanRepository.createLoan(
@@ -466,6 +476,10 @@ class _AdminHomeState extends State<_AdminHome> {
                                               dailyPenaltyAmount,
                                           issuedAt: issuedAt,
                                           schedule: schedule,
+                                          paymentIntervalCount:
+                                              paymentIntervalCount,
+                                          paymentIntervalUnit:
+                                              paymentIntervalUnit,
                                           note: note,
                                         );
                                       },
@@ -1059,7 +1073,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
 
     try {
       final json = await widget.backupService!.exportBackupJson();
-      final now = DateTime.now();
+      final now = AppClock.now();
       final suggestedName =
           'microzaimich-backup-${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}-${now.minute.toString().padLeft(2, '0')}.json';
       final tempDir = await getTemporaryDirectory();
@@ -1740,7 +1754,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 const SizedBox(height: 16),
                 ..._buildAdminSettingsSections(context),
               ],
-              if (DateTime.now().year < 0) ...[
+              if (AppClock.now().year < 0) ...[
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   secondary: const Icon(Icons.visibility_off_outlined),
