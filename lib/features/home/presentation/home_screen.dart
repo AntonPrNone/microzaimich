@@ -261,6 +261,7 @@ class _AdminHomeState extends State<_AdminHome> {
           required double interestPercent,
           required double totalAmount,
           required double dailyPenaltyAmount,
+          required DateTime issuedAt,
           required List<PaymentScheduleItem> schedule,
           String? note,
         }) async {
@@ -271,6 +272,7 @@ class _AdminHomeState extends State<_AdminHome> {
             interestPercent: interestPercent,
             totalAmount: totalAmount,
             dailyPenaltyAmount: dailyPenaltyAmount,
+            issuedAt: issuedAt,
             schedule: schedule,
             note: note,
           );
@@ -408,6 +410,7 @@ class _AdminHomeState extends State<_AdminHome> {
                                       clients: clients,
                                       loans: loans,
                                       hideClosedLoans: _hideClosedLoans,
+                                      watchLoansForUser: widget.loanRepository.watchLoansForUser,
                                       onEditLoan: (loan) => _openLoanEditor(
                                         context,
                                         clients,
@@ -446,6 +449,7 @@ class _AdminHomeState extends State<_AdminHome> {
                                         required double interestPercent,
                                         required double totalAmount,
                                         required double dailyPenaltyAmount,
+                                        required DateTime issuedAt,
                                         required List<PaymentScheduleItem>
                                             schedule,
                                         String? note,
@@ -458,6 +462,7 @@ class _AdminHomeState extends State<_AdminHome> {
                                           totalAmount: totalAmount,
                                           dailyPenaltyAmount:
                                               dailyPenaltyAmount,
+                                          issuedAt: issuedAt,
                                           schedule: schedule,
                                           note: note,
                                         );
@@ -1166,6 +1171,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     }
   }
 
+  // ignore: unused_element
   Future<void> _pickAdminReminderTime() async {
     final picked = await showTimePicker(
       context: context,

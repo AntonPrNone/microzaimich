@@ -42,6 +42,7 @@ class LoanRepository {
     required double interestPercent,
     required double totalAmount,
     required double dailyPenaltyAmount,
+    required DateTime issuedAt,
     required List<PaymentScheduleItem> schedule,
     String? note,
   }) async {
@@ -54,7 +55,7 @@ class LoanRepository {
       interestPercent: interestPercent,
       totalAmount: totalAmount,
       dailyPenaltyAmount: dailyPenaltyAmount,
-      issuedAt: AppClock.nowForStorage(),
+      issuedAt: issuedAt,
       schedule: schedule,
       status: 'active',
       note: note,

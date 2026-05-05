@@ -464,9 +464,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
                           OutlinedButton.icon(
                             onPressed: () async {
                               await Clipboard.setData(
-                                ClipboardData(
-                                  text: Formatters.decimalInput(amount),
-                                ),
+                                ClipboardData(text: Formatters.decimalInput(amount)),
                               );
                               await showCopied('Сумма платежа скопирована');
                             },
@@ -534,12 +532,14 @@ class _ClientDashboardState extends State<ClientDashboard> {
     final totalPenalty = activeLoans.fold<double>(0, (sum, loan) => sum + loan.penaltyOutstanding);
     final totalPenaltyPaid = widget.loans.fold<double>(0, (sum, loan) => sum + loan.penaltyPaid);
 
-    final unpaidDates = activeLoans
-        .expand(
-          (loan) => loan.orderedSchedule.where((item) => !item.isPaid).map((item) => item.dueDate),
-        )
-        .toList()
-      ..sort();
+    final unpaidDates =
+        activeLoans
+            .expand(
+              (loan) =>
+                  loan.orderedSchedule.where((item) => !item.isPaid).map((item) => item.dueDate),
+            )
+            .toList()
+          ..sort();
     final nearestPaymentDate = unpaidDates.isEmpty ? null : unpaidDates.first;
     final latestPaymentDate = unpaidDates.isEmpty ? null : unpaidDates.last;
 
@@ -701,13 +701,13 @@ class _ClientDashboardState extends State<ClientDashboard> {
                                         label: 'Ближайший',
                                         value: Formatters.dateCompact(nearestPaymentDate),
                                       ),
-                                const SizedBox(height: 4),
-                                _MetricDetailLine(
-                                  label: 'Последний',
-                                  value: latestPaymentDate == null
-                                      ? 'Нет платежей'
-                                      : Formatters.dateCompact(latestPaymentDate),
-                                ),
+                                      const SizedBox(height: 4),
+                                      _MetricDetailLine(
+                                        label: 'Последний',
+                                        value: latestPaymentDate == null
+                                            ? 'Нет платежей'
+                                            : Formatters.dateCompact(latestPaymentDate),
+                                      ),
                                     ],
                                   ),
                           ),
@@ -828,21 +828,14 @@ class _ClientDashboardState extends State<ClientDashboard> {
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
             sliver: SliverToBoxAdapter(
               child: Divider(
-                color: Theme.of(context).colorScheme.outlineVariant.withValues(
-                  alpha: 0.45,
-                ),
+                color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.45),
                 height: 1,
               ),
             ),
           ),
         if (closedLoans.isNotEmpty) ...[
           SliverPadding(
-            padding: EdgeInsets.fromLTRB(
-              20,
-              20,
-              20,
-              _closedLoansExpanded ? 0 : 20,
-            ),
+            padding: EdgeInsets.fromLTRB(20, 20, 20, _closedLoansExpanded ? 0 : 20),
             sliver: SliverToBoxAdapter(
               child: InkWell(
                 onTap: _toggleClosedLoans,
@@ -928,10 +921,7 @@ class _ClosedLoanCard extends StatelessWidget {
                   const CircleAvatar(child: Icon(Icons.check_circle_outline)),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: Text(
-                      loan.displayTitle,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
+                    child: Text(loan.displayTitle, style: Theme.of(context).textTheme.titleMedium),
                   ),
                 ],
               ),
@@ -981,264 +971,270 @@ class _LoanCard extends StatelessWidget {
     final lastDate = loan.schedule.isEmpty ? loan.issuedAt : loan.schedule.last.dueDate;
     final secondaryColor = Theme.of(context).colorScheme.secondary;
     final isOverdue = loan.penaltyOutstanding > 0;
-    final statusColor = isOverdue
-        ? const Color(0xFFFFC26B)
-        : const Color(0xFF8BC4FF);
+    final statusColor = isOverdue ? const Color(0xFFFFC26B) : const Color(0xFF8BC4FF);
     final statusLabel = isOverdue ? 'Просрочен' : 'В процессе';
 
     return Stack(
       children: [
         Padding(
-          padding: const EdgeInsets.only(top: 12),
+          padding: const EdgeInsets.only(top: 10),
           child: Card(
-          clipBehavior: Clip.antiAlias,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-            side: BorderSide(color: statusColor.withValues(alpha: 0.18)),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(loan.displayTitle, style: Theme.of(context).textTheme.titleLarge),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    const Spacer(),
-                    if (dragIndicator != null)
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 180),
-                        curve: Curves.easeOut,
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: isDragReady
-                              ? secondaryColor.withValues(alpha: 0.18)
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: isDragReady
-                                ? secondaryColor.withValues(alpha: 0.28)
-                                : Colors.transparent,
-                          ),
+            clipBehavior: Clip.antiAlias,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+              side: BorderSide(
+                color: isDragReady ? Colors.transparent : statusColor.withValues(alpha: 0.38),
+                width: 1.35,
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          loan.displayTitle,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(height: 1.05),
                         ),
-                        child: dragIndicator!,
                       ),
-                  ],
-                ),
-                ClipRect(
-                  child: AnimatedSize(
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeInOut,
-                    alignment: Alignment.topCenter,
-                    child: AnimatedOpacity(
-                      duration: const Duration(milliseconds: 180),
-                      curve: Curves.easeInOut,
-                      opacity: isDragReady ? 1 : 0,
-                      child: showDragHint
-                          ? Padding(
-                              padding: const EdgeInsets.only(top: 8),
-                              child: Row(
-                                children: [
-                                  Icon(Icons.open_with_rounded, size: 16, color: secondaryColor),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    'Теперь можно переносить',
-                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: secondaryColor,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )
-                          : const SizedBox.shrink(),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text('Сумма займа: ${Formatters.money(loan.principal)}'),
-                Text('Процент: ${Formatters.decimalInput(loan.interestPercent)}%'),
-                Text('К возврату по плану: ${Formatters.money(loan.plannedTotalAmount)}'),
-                Text('Плановый остаток: ${Formatters.money(loan.plannedOutstandingAmount)}'),
-                Text('Сейчас к закрытию: ${Formatters.money(loan.fullCloseAmount)}'),
-                Text('Пеня за день: ${Formatters.money(loan.dailyPenaltyAmount)}'),
-                Text('Срок: ${Formatters.date(firstDate)} - ${Formatters.date(lastDate)}'),
-                if (nextUnpaid != null)
-                  Text('Следующий платёж: ${Formatters.date(nextUnpaid.dueDate)}'),
-                const SizedBox(height: 12),
-                InkWell(
-                  onTap: () => onExpansionChanged(!isExpanded),
-                  borderRadius: BorderRadius.circular(16),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    decoration: BoxDecoration(
-                      border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.08))),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          isExpanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
-                          size: 18,
-                          color: secondaryColor,
-                        ),
+                      if (dragIndicator != null) ...[
                         const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            isExpanded ? 'Свернуть детали' : 'Нажмите, чтобы развернуть',
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
-                            style: Theme.of(context).textTheme.bodyMedium,
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          curve: Curves.easeOut,
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: isDragReady
+                                ? secondaryColor.withValues(alpha: 0.18)
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isDragReady
+                                  ? secondaryColor.withValues(alpha: 0.28)
+                                  : Colors.transparent,
+                            ),
                           ),
+                          child: dragIndicator!,
                         ),
                       ],
-                    ),
+                    ],
                   ),
-                ),
-                AnimatedSize(
-                  duration: const Duration(milliseconds: 220),
-                  curve: Curves.easeInOut,
-                  alignment: Alignment.topCenter,
-                  child: isExpanded
-                      ? Padding(
-                          padding: const EdgeInsets.only(top: 16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if ((loan.note ?? '').trim().isNotEmpty) ...[
-                                const SizedBox(height: 10),
-                                Text(loan.note!),
-                              ],
-                              const SizedBox(height: 18),
-                              Container(
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(18),
-                                  border: Border.all(
-                                    color: secondaryColor.withValues(alpha: 0.18),
-                                  ),
-                                ),
+                  ClipRect(
+                    child: AnimatedSize(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeInOut,
+                      alignment: Alignment.topCenter,
+                      child: AnimatedOpacity(
+                        duration: const Duration(milliseconds: 180),
+                        curve: Curves.easeInOut,
+                        opacity: isDragReady ? 1 : 0,
+                        child: showDragHint
+                            ? Padding(
+                                padding: const EdgeInsets.only(top: 8),
                                 child: Row(
                                   children: [
-                                    Expanded(
-                                      child: FilledButton.tonalIcon(
-                                        onPressed: onPayNext,
-                                        style: FilledButton.styleFrom(
-                                          shape: const RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.only(
-                                              topLeft: Radius.circular(18),
-                                              bottomLeft: Radius.circular(18),
-                                              topRight: Radius.circular(0),
-                                              bottomRight: Radius.circular(0),
-                                            ),
-                                          ),
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 10,
-                                            vertical: 14,
-                                          ),
-                                        ),
-                                        icon: const Icon(
-                                          Icons.payments_outlined,
-                                          size: 18,
-                                        ),
-                                        label: const FittedBox(
-                                          fit: BoxFit.scaleDown,
-                                          child: Text('Следующий платёж'),
-                                        ),
-                                      ),
-                                    ),
-                                    Container(
-                                      width: 1,
-                                      height: 48,
-                                      color: secondaryColor.withValues(alpha: 0.14),
-                                    ),
-                                    Expanded(
-                                      child: OutlinedButton.icon(
-                                        onPressed: onCloseLoan,
-                                        style: OutlinedButton.styleFrom(
-                                          shape: const RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.only(
-                                              topRight: Radius.circular(18),
-                                              bottomRight: Radius.circular(18),
-                                              topLeft: Radius.circular(0),
-                                              bottomLeft: Radius.circular(0),
-                                            ),
-                                          ),
-                                          side: BorderSide.none,
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 10,
-                                            vertical: 14,
-                                          ),
-                                        ),
-                                        icon: const Icon(
-                                          Icons.task_alt_outlined,
-                                          size: 18,
-                                        ),
-                                        label: const FittedBox(
-                                          fit: BoxFit.scaleDown,
-                                          child: Text('Погасить полностью'),
-                                        ),
+                                    Icon(Icons.open_with_rounded, size: 16, color: secondaryColor),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Теперь можно переносить',
+                                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                        color: secondaryColor,
+                                        fontWeight: FontWeight.w600,
                                       ),
                                     ),
                                   ],
                                 ),
-                              ),
-                              const SizedBox(height: 20),
-                              Text(
-                                'График платежей',
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                              const SizedBox(height: 12),
-                              ...loan.schedule.asMap().entries.map(
-                                (entry) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 12),
-                                  child: _ScheduleCard(
-                                    loan: loan,
-                                    item: entry.value,
-                                    index: entry.key,
-                                    isDueToday: loan.isItemDueToday(entry.value),
-                                    isOverdue: loan.isItemOverdue(entry.value),
-                                    penalty: loan.penaltyForItem(entry.value),
+                              )
+                            : const SizedBox.shrink(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text('Сумма займа: ${Formatters.money(loan.principal)}'),
+                  Text('Процент: ${Formatters.decimalInput(loan.interestPercent)}%'),
+                  Text('К возврату по плану: ${Formatters.money(loan.plannedTotalAmount)}'),
+                  Text('Плановый остаток: ${Formatters.money(loan.plannedOutstandingAmount)}'),
+                  Text('Сейчас к закрытию: ${Formatters.money(loan.fullCloseAmount)}'),
+                  Text('Пеня за день: ${Formatters.money(loan.dailyPenaltyAmount)}'),
+                  Text('Срок: ${Formatters.date(firstDate)} - ${Formatters.date(lastDate)}'),
+                  if (nextUnpaid != null)
+                    Text('Следующий платёж: ${Formatters.date(nextUnpaid.dueDate)}'),
+                  const SizedBox(height: 12),
+                  InkWell(
+                    onTap: () => onExpansionChanged(!isExpanded),
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        border: Border(
+                          top: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            isExpanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                            size: 18,
+                            color: secondaryColor,
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              isExpanded ? 'Свернуть детали' : 'Нажмите, чтобы развернуть',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeInOut,
+                    alignment: Alignment.topCenter,
+                    child: isExpanded
+                        ? Padding(
+                            padding: const EdgeInsets.only(top: 16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if ((loan.note ?? '').trim().isNotEmpty) ...[
+                                  const SizedBox(height: 10),
+                                  Text(loan.note!),
+                                ],
+                                const SizedBox(height: 18),
+                                Container(
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(18),
+                                    border: Border.all(
+                                      color: secondaryColor.withValues(alpha: 0.18),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: FilledButton.tonalIcon(
+                                          onPressed: onPayNext,
+                                          style: FilledButton.styleFrom(
+                                            shape: const RoundedRectangleBorder(
+                                              borderRadius: BorderRadius.only(
+                                                topLeft: Radius.circular(18),
+                                                bottomLeft: Radius.circular(18),
+                                                topRight: Radius.circular(0),
+                                                bottomRight: Radius.circular(0),
+                                              ),
+                                            ),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 10,
+                                              vertical: 14,
+                                            ),
+                                          ),
+                                          icon: const Icon(Icons.payments_outlined, size: 18),
+                                          label: const FittedBox(
+                                            fit: BoxFit.scaleDown,
+                                            child: Text('Следующий платёж'),
+                                          ),
+                                        ),
+                                      ),
+                                      Container(
+                                        width: 1,
+                                        height: 48,
+                                        color: secondaryColor.withValues(alpha: 0.14),
+                                      ),
+                                      Expanded(
+                                        child: OutlinedButton.icon(
+                                          onPressed: onCloseLoan,
+                                          style: OutlinedButton.styleFrom(
+                                            shape: const RoundedRectangleBorder(
+                                              borderRadius: BorderRadius.only(
+                                                topRight: Radius.circular(18),
+                                                bottomRight: Radius.circular(18),
+                                                topLeft: Radius.circular(0),
+                                                bottomLeft: Radius.circular(0),
+                                              ),
+                                            ),
+                                            side: BorderSide.none,
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 10,
+                                              vertical: 14,
+                                            ),
+                                          ),
+                                          icon: const Icon(Icons.task_alt_outlined, size: 18),
+                                          label: const FittedBox(
+                                            fit: BoxFit.scaleDown,
+                                            child: Text('Погасить полностью'),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                              ),
-                            ],
-                          ),
-                        )
-                      : const SizedBox.shrink(),
-                ),
-              ],
+                                const SizedBox(height: 20),
+                                Text(
+                                  'График платежей',
+                                  style: Theme.of(context).textTheme.titleMedium,
+                                ),
+                                const SizedBox(height: 12),
+                                ...loan.schedule.asMap().entries.map(
+                                  (entry) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: _ScheduleCard(
+                                      loan: loan,
+                                      item: entry.value,
+                                      index: entry.key,
+                                      isDueToday: loan.isItemDueToday(entry.value),
+                                      isOverdue: loan.isItemOverdue(entry.value),
+                                      penalty: loan.penaltyForItem(entry.value),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ],
+              ),
             ),
-          ),
           ),
         ),
         Positioned(
           top: 0,
           left: 18,
-          child: _StatusRibbon(
-            label: statusLabel,
-            color: statusColor,
-          ),
+          child: _StatusRibbon(label: statusLabel, color: statusColor),
         ),
-        Positioned.fill(
-          child: IgnorePointer(
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 180),
-              opacity: isDragReady ? 1 : 0,
-              child: Padding(
-                padding: const EdgeInsets.all(2),
-                child: CustomPaint(
-                  painter: _DashedCardBorderPainter(
-                    color: secondaryColor.withValues(alpha: 0.65),
-                    radius: 26,
+          Positioned(
+            top: 10,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: IgnorePointer(
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 180),
+                opacity: isDragReady ? 1 : 0,
+                child: Padding(
+                  padding: const EdgeInsets.all(2),
+                  child: CustomPaint(
+                    painter: _DashedCardBorderPainter(
+                      color: secondaryColor.withValues(alpha: 0.65),
+                      radius: 26,
+                    ),
                   ),
                 ),
               ),
             ),
           ),
-        ),
       ],
     );
   }
@@ -1327,10 +1323,9 @@ class _ScheduleCard extends StatelessWidget {
               ),
               child: Text(
                 '${index + 1}',
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: accentColor,
-                  fontWeight: FontWeight.w800,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.labelMedium?.copyWith(color: accentColor, fontWeight: FontWeight.w800),
               ),
             ),
           ),
@@ -1386,10 +1381,7 @@ Future<void> _showLoanScheduleSheet(BuildContext context, Loan loan) async {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'График платежей',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
+              Text('График платежей', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 6),
               Text(loan.displayTitle, style: Theme.of(context).textTheme.bodyMedium),
               const SizedBox(height: 16),
@@ -1504,9 +1496,7 @@ class _MetricDetailLine extends StatelessWidget {
           value,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w700,
-          ),
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
         ),
       ],
     );
@@ -1514,11 +1504,7 @@ class _MetricDetailLine extends StatelessWidget {
 }
 
 class _CompactMetricItem {
-  const _CompactMetricItem({
-    required this.label,
-    required this.value,
-    required this.color,
-  });
+  const _CompactMetricItem({required this.label, required this.value, required this.color});
 
   final String label;
   final String value;
@@ -1551,10 +1537,7 @@ class _CompactMetricLegend extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 6),
-                  Text(
-                    item.value,
-                    style: textStyle?.copyWith(fontWeight: FontWeight.w700),
-                  ),
+                  Text(item.value, style: textStyle?.copyWith(fontWeight: FontWeight.w700)),
                   const SizedBox(width: 4),
                   Text(
                     item.label,
@@ -1571,6 +1554,7 @@ class _CompactMetricLegend extends StatelessWidget {
   }
 }
 
+// ignore: unused_element
 class _StatusChip extends StatelessWidget {
   const _StatusChip({required this.label, required this.color});
 
@@ -1595,10 +1579,7 @@ class _StatusChip extends StatelessWidget {
 }
 
 class _StatusRibbon extends StatelessWidget {
-  const _StatusRibbon({
-    required this.label,
-    required this.color,
-  });
+  const _StatusRibbon({required this.label, required this.color});
 
   final String label;
   final Color color;
@@ -1606,18 +1587,17 @@ class _StatusRibbon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.16),
+        color: color.withValues(alpha: 0.18),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.28)),
+        border: Border.all(color: color.withValues(alpha: 0.34), width: 1.1),
       ),
       child: Text(
         label,
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-          color: color,
-          fontWeight: FontWeight.w700,
-        ),
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: color, fontWeight: FontWeight.w700, height: 1.0),
       ),
     );
   }

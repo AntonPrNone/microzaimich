@@ -37,6 +37,7 @@ class AdminClientsTab extends StatefulWidget {
     required this.clients,
     required this.loans,
     required this.hideClosedLoans,
+    required this.watchLoansForUser,
     required this.onEditLoan,
   });
 
@@ -44,6 +45,7 @@ class AdminClientsTab extends StatefulWidget {
   final List<AppUser> clients;
   final List<Loan> loans;
   final bool hideClosedLoans;
+  final Stream<List<Loan>> Function(String userId) watchLoansForUser;
   final Future<void> Function(Loan loan) onEditLoan;
 
   @override
@@ -62,8 +64,7 @@ class _AdminClientsTabState extends State<AdminClientsTab> {
   final Set<_ClientQuickFilter> _filters = <_ClientQuickFilter>{};
 
   String get _orderPrefsKey => 'admin_client_order_${widget.currentViewerId}';
-  String get _archivedPrefsKey =>
-      'admin_archived_clients_${widget.currentViewerId}';
+  String get _archivedPrefsKey => 'admin_archived_clients_${widget.currentViewerId}';
 
   @override
   void initState() {
@@ -210,9 +211,7 @@ class _AdminClientsTabState extends State<AdminClientsTab> {
         if (!mounted) {
           return;
         }
-        if (_visibleDragHintClientId == hintClientId &&
-            !_dragPrepared &&
-            !_reorderActive) {
+        if (_visibleDragHintClientId == hintClientId && !_dragPrepared && !_reorderActive) {
           setState(() {
             _visibleDragHintClientId = null;
           });
@@ -250,13 +249,12 @@ class _AdminClientsTabState extends State<AdminClientsTab> {
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       builder: (context) {
         final mediaQuery = MediaQuery.of(context);
-        final availableHeight =
-            mediaQuery.size.height - mediaQuery.padding.top - 12;
+        final availableHeight = mediaQuery.size.height - mediaQuery.padding.top - 12;
         return SizedBox(
           height: availableHeight,
           child: _ClientLoansSheet(
             client: client,
-            loans: clientLoans,
+            loanStream: widget.watchLoansForUser(client.id),
             onEditLoan: widget.onEditLoan,
           ),
         );
@@ -267,47 +265,37 @@ class _AdminClientsTabState extends State<AdminClientsTab> {
   @override
   Widget build(BuildContext context) {
     List<Loan> allClientLoans(AppUser client) =>
-        widget.loans
-            .where((loan) => loan.userId == client.id)
-            .toList()
-          ..sort((a, b) {
-            final aActive = a.status == 'active';
-            final bActive = b.status == 'active';
-            if (aActive != bActive) {
-              return aActive ? -1 : 1;
-            }
-            return a.issuedAt.compareTo(b.issuedAt);
-          });
+        widget.loans.where((loan) => loan.userId == client.id).toList()..sort((a, b) {
+          final aActive = a.status == 'active';
+          final bActive = b.status == 'active';
+          if (aActive != bActive) {
+            return aActive ? -1 : 1;
+          }
+          return a.issuedAt.compareTo(b.issuedAt);
+        });
 
     Widget buildClientCard(AppUser client, {required int? reorderIndex}) {
       final loans = allClientLoans(client);
       final clientLoans = loans
           .where((loan) => !widget.hideClosedLoans || loan.status == 'active')
           .toList();
-      final previewLoans = clientLoans.isEmpty && loans.isNotEmpty
-          ? loans
-          : clientLoans;
+      final previewLoans = clientLoans.isEmpty && loans.isNotEmpty ? loans : clientLoans;
       final totalDebt = loans.fold<double>(
         0,
         (debtSum, loan) => debtSum + loan.plannedOutstandingAmount,
       );
       final totalPenalty = loans.fold<double>(
         0,
-        (penaltySum, loan) =>
-            penaltySum + loan.penaltyOutstanding + loan.penaltyPaid,
+        (penaltySum, loan) => penaltySum + loan.penaltyOutstanding + loan.penaltyPaid,
       );
-      final totalPaid = loans.fold<double>(
-        0,
-        (paidSum, loan) => paidSum + loan.paidAmount,
-      );
+      final totalPaid = loans.fold<double>(0, (paidSum, loan) => paidSum + loan.paidAmount);
       final hasOverdueLoans = loans.any(
         (loan) => loan.status == 'active' && loan.penaltyOutstanding > 0,
       );
       final activeLoans = loans.where((loan) => loan.status == 'active').length;
       final closedLoans = loans.length - activeLoans;
-      final nextDates =
-          loans.map((loan) => loan.nextUnpaid?.dueDate).whereType<DateTime>().toList()
-            ..sort();
+      final nextDates = loans.map((loan) => loan.nextUnpaid?.dueDate).whereType<DateTime>().toList()
+        ..sort();
       final nearestPaymentDate = nextDates.isEmpty ? null : nextDates.first;
       final earliestLoanDate = loans.isEmpty ? null : loans.first.issuedAt;
       final latestLoanDate = loans.isEmpty ? null : loans.last.issuedAt;
@@ -332,12 +320,8 @@ class _AdminClientsTabState extends State<AdminClientsTab> {
               reorderIndex != null &&
               (_dragPrepared || _reorderActive) &&
               _visibleDragHintClientId == client.id,
-          showDragHint:
-              reorderIndex != null && _visibleDragHintClientId == client.id,
-          onOpenLoans: () => _openClientLoansSheet(
-            client: client,
-            clientLoans: previewLoans,
-          ),
+          showDragHint: reorderIndex != null && _visibleDragHintClientId == client.id,
+          onOpenLoans: () => _openClientLoansSheet(client: client, clientLoans: previewLoans),
           dragIndicator: reorderIndex == null
               ? null
               : Listener(
@@ -385,8 +369,7 @@ class _AdminClientsTabState extends State<AdminClientsTab> {
       if (_filters.contains(_ClientQuickFilter.active) && !hasActive) {
         return false;
       }
-      if (_filters.contains(_ClientQuickFilter.closed) &&
-          (hasActive || !hasClosed)) {
+      if (_filters.contains(_ClientQuickFilter.closed) && (hasActive || !hasClosed)) {
         return false;
       }
 
@@ -408,10 +391,7 @@ class _AdminClientsTabState extends State<AdminClientsTab> {
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
           sliver: SliverToBoxAdapter(
-            child: Text(
-              'Клиенты и займы',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
+            child: Text('Клиенты и займы', style: Theme.of(context).textTheme.titleLarge),
           ),
         ),
         SliverPadding(
@@ -460,47 +440,42 @@ class _AdminClientsTabState extends State<AdminClientsTab> {
             padding: EdgeInsets.fromLTRB(20, 12, 20, 20),
             sliver: SliverToBoxAdapter(
               child: Card(
-                child: Padding(
-                  padding: EdgeInsets.all(20),
-                  child: Text('Пока нет клиентов'),
-                ),
+                child: Padding(padding: EdgeInsets.all(20), child: Text('Пока нет клиентов')),
               ),
             ),
           )
         else ...[
           if (activeClients.isNotEmpty)
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-            sliver: SliverReorderableList(
-              itemCount: activeClients.length,
-              proxyDecorator: (child, index, animation) {
-                return Material(color: Colors.transparent, child: child);
-              },
-              onReorderStart: (_) => _handleReorderStart(),
-              onReorderEnd: (_) => _handleReorderEnd(),
-              onReorder: (oldIndex, newIndex) async {
-                if (newIndex > oldIndex) {
-                  newIndex -= 1;
-                }
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+              sliver: SliverReorderableList(
+                itemCount: activeClients.length,
+                proxyDecorator: (child, index, animation) {
+                  return Material(color: Colors.transparent, child: child);
+                },
+                onReorderStart: (_) => _handleReorderStart(),
+                onReorderEnd: (_) => _handleReorderEnd(),
+                onReorder: (oldIndex, newIndex) async {
+                  if (newIndex > oldIndex) {
+                    newIndex -= 1;
+                  }
 
-                final ids = activeClients.map((client) => client.id).toList();
-                final moved = ids.removeAt(oldIndex);
-                ids.insert(newIndex, moved);
+                  final ids = activeClients.map((client) => client.id).toList();
+                  final moved = ids.removeAt(oldIndex);
+                  ids.insert(newIndex, moved);
 
-                setState(() {
-                  final archivedIds = _clientOrderIds
-                      .where((id) => !ids.contains(id))
-                      .toList();
-                  _clientOrderIds = [...ids, ...archivedIds];
-                });
+                  setState(() {
+                    final archivedIds = _clientOrderIds.where((id) => !ids.contains(id)).toList();
+                    _clientOrderIds = [...ids, ...archivedIds];
+                  });
 
-                await _saveClientOrder(_clientOrderIds);
-              },
-              itemBuilder: (context, index) {
-                return buildClientCard(activeClients[index], reorderIndex: index);
-              },
+                  await _saveClientOrder(_clientOrderIds);
+                },
+                itemBuilder: (context, index) {
+                  return buildClientCard(activeClients[index], reorderIndex: index);
+                },
+              ),
             ),
-          ),
           if (archivedClients.isNotEmpty)
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
@@ -542,12 +517,7 @@ class _AdminClientsTabState extends State<AdminClientsTab> {
                               padding: const EdgeInsets.only(top: 16),
                               child: Column(
                                 children: archivedClients
-                                    .map(
-                                      (client) => buildClientCard(
-                                        client,
-                                        reorderIndex: null,
-                                      ),
-                                    )
+                                    .map((client) => buildClientCard(client, reorderIndex: null))
                                     .toList(),
                               ),
                             ),
@@ -611,20 +581,14 @@ class _AdminClientCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final secondaryColor = Theme.of(context).colorScheme.secondary;
-    Future<void> showMetricHelp({
-      required String title,
-      required String message,
-    }) async {
+    Future<void> showMetricHelp({required String title, required String message}) async {
       await showDialog<void>(
         context: context,
         builder: (context) => AlertDialog(
           title: Text(title),
           content: Text(message),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Понятно'),
-            ),
+            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Понятно')),
           ],
         ),
       );
@@ -647,28 +611,18 @@ class _AdminClientCard extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            client.name,
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
+                          Text(client.name, style: Theme.of(context).textTheme.titleMedium),
                           const SizedBox(height: 4),
                           Text(Formatters.phone(client.phone)),
                           if (hasOverdueLoans) ...[
                             const SizedBox(height: 8),
                             Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 5,
-                              ),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                               decoration: BoxDecoration(
-                                color: const Color(
-                                  0xFFFFC26B,
-                                ).withValues(alpha: 0.14),
+                                color: const Color(0xFFFFC26B).withValues(alpha: 0.14),
                                 borderRadius: BorderRadius.circular(999),
                                 border: Border.all(
-                                  color: const Color(
-                                    0xFFFFC26B,
-                                  ).withValues(alpha: 0.28),
+                                  color: const Color(0xFFFFC26B).withValues(alpha: 0.28),
                                 ),
                               ),
                               child: Row(
@@ -682,13 +636,10 @@ class _AdminClientCard extends StatelessWidget {
                                   const SizedBox(width: 6),
                                   Text(
                                     'Есть просрочка',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
-                                        ?.copyWith(
-                                          color: const Color(0xFFFFC26B),
-                                          fontWeight: FontWeight.w700,
-                                        ),
+                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: const Color(0xFFFFC26B),
+                                      fontWeight: FontWeight.w700,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -701,10 +652,7 @@ class _AdminClientCard extends StatelessWidget {
                       AnimatedContainer(
                         duration: const Duration(milliseconds: 180),
                         curve: Curves.easeOut,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 6,
-                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                         decoration: BoxDecoration(
                           color: isDragReady
                               ? secondaryColor.withValues(alpha: 0.18)
@@ -734,19 +682,14 @@ class _AdminClientCard extends StatelessWidget {
                               padding: const EdgeInsets.only(top: 10),
                               child: Row(
                                 children: [
-                                  Icon(
-                                    Icons.open_with_rounded,
-                                    size: 16,
-                                    color: secondaryColor,
-                                  ),
+                                  Icon(Icons.open_with_rounded, size: 16, color: secondaryColor),
                                   const SizedBox(width: 6),
                                   Text(
                                     'Теперь можно переносить',
-                                    style: Theme.of(context).textTheme.bodySmall
-                                        ?.copyWith(
-                                          color: secondaryColor,
-                                          fontWeight: FontWeight.w600,
-                                        ),
+                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: secondaryColor,
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -818,9 +761,7 @@ class _AdminClientCard extends StatelessWidget {
                   ),
                 if (nearestPaymentDate != null) ...[
                   const SizedBox(height: 4),
-                  Text(
-                    'Ближайший платёж ${Formatters.date(nearestPaymentDate!)}',
-                  ),
+                  Text('Ближайший платёж ${Formatters.date(nearestPaymentDate!)}'),
                 ],
                 const SizedBox(height: 14),
                 SizedBox(
@@ -829,9 +770,7 @@ class _AdminClientCard extends StatelessWidget {
                     onPressed: onOpenLoans,
                     icon: const Icon(Icons.view_carousel_outlined),
                     label: Text(
-                      clientLoans.isEmpty
-                          ? 'У клиента пока нет займов'
-                          : 'Открыть займы клиента',
+                      clientLoans.isEmpty ? 'У клиента пока нет займов' : 'Открыть займы клиента',
                     ),
                   ),
                 ),
@@ -864,12 +803,12 @@ class _AdminClientCard extends StatelessWidget {
 class _ClientLoansSheet extends StatefulWidget {
   const _ClientLoansSheet({
     required this.client,
-    required this.loans,
+    required this.loanStream,
     required this.onEditLoan,
   });
 
   final AppUser client;
-  final List<Loan> loans;
+  final Stream<List<Loan>> loanStream;
   final Future<void> Function(Loan loan) onEditLoan;
 
   @override
@@ -941,12 +880,7 @@ class _ProfitBreakdownSheetState extends State<_ProfitBreakdownSheet> {
     List<_ProfitBreakdownEntry> entries,
   ) {
     if (entries.isEmpty) {
-      return Center(
-        child: Text(
-          'Пока нет данных',
-          style: Theme.of(context).textTheme.bodyMedium,
-        ),
-      );
+      return Center(child: Text('Пока нет данных', style: Theme.of(context).textTheme.bodyMedium));
     }
 
     return Column(
@@ -970,9 +904,7 @@ class _ProfitBreakdownSheetState extends State<_ProfitBreakdownSheet> {
                   ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(18),
                   border: Border.all(
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.outlineVariant.withValues(alpha: 0.3),
+                    color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.3),
                   ),
                 ),
                 child: Row(
@@ -981,10 +913,7 @@ class _ProfitBreakdownSheetState extends State<_ProfitBreakdownSheet> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            entry.clientName,
-                            style: Theme.of(context).textTheme.titleSmall,
-                          ),
+                          Text(entry.clientName, style: Theme.of(context).textTheme.titleSmall),
                           if (entry.clientPhone != null) ...[
                             const SizedBox(height: 4),
                             Text(
@@ -1018,11 +947,7 @@ class _ProfitBreakdownSheetState extends State<_ProfitBreakdownSheet> {
         subtitle: 'С кого сколько ожидается по плану',
         entries: widget.plannedEntries,
       ),
-      (
-        title: 'Получено',
-        subtitle: 'С кого сколько уже получено',
-        entries: widget.receivedEntries,
-      ),
+      (title: 'Получено', subtitle: 'С кого сколько уже получено', entries: widget.receivedEntries),
       (
         title: 'Осталось получить',
         subtitle: 'С кого сколько ещё осталось получить',
@@ -1047,12 +972,7 @@ class _ProfitBreakdownSheetState extends State<_ProfitBreakdownSheet> {
                   final page = pages[index];
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 8),
-                    child: _buildPage(
-                      context,
-                      page.title,
-                      page.subtitle,
-                      page.entries,
-                    ),
+                    child: _buildPage(context, page.title, page.subtitle, page.entries),
                   );
                 },
               ),
@@ -1061,9 +981,7 @@ class _ProfitBreakdownSheetState extends State<_ProfitBreakdownSheet> {
             Row(
               children: [
                 IconButton(
-                  onPressed: _currentPage > 0
-                      ? () => _goToPage(_currentPage - 1)
-                      : null,
+                  onPressed: _currentPage > 0 ? () => _goToPage(_currentPage - 1) : null,
                   icon: const Icon(Icons.chevron_left_rounded),
                 ),
                 Expanded(
@@ -1088,10 +1006,9 @@ class _ProfitBreakdownSheetState extends State<_ProfitBreakdownSheet> {
                               decoration: BoxDecoration(
                                 color: selected
                                     ? Theme.of(context).colorScheme.secondary
-                                    : Theme.of(context)
-                                          .colorScheme
-                                          .secondary
-                                          .withValues(alpha: 0.28),
+                                    : Theme.of(
+                                        context,
+                                      ).colorScheme.secondary.withValues(alpha: 0.28),
                                 borderRadius: BorderRadius.circular(999),
                               ),
                             ),
@@ -1099,10 +1016,7 @@ class _ProfitBreakdownSheetState extends State<_ProfitBreakdownSheet> {
                         }),
                       ),
                       const SizedBox(height: 6),
-                      Text(
-                        _titles[_currentPage],
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
+                      Text(_titles[_currentPage], style: Theme.of(context).textTheme.bodySmall),
                     ],
                   ),
                 ),
@@ -1148,16 +1062,14 @@ class _ClientLoansSheetState extends State<_ClientLoansSheet> {
     );
   }
 
-  List<int> _visibleIndicatorIndexes(int maxVisible) {
-    if (widget.loans.isEmpty) {
+  List<int> _visibleIndicatorIndexes(int maxVisible, int totalLoans) {
+    if (totalLoans == 0) {
       return const [];
     }
 
     final targetCount = maxVisible.isEven ? maxVisible - 1 : maxVisible;
     final normalizedTargetCount = targetCount < 1 ? 1 : targetCount;
-    final int count = widget.loans.length < 3
-        ? widget.loans.length
-        : normalizedTargetCount.clamp(3, widget.loans.length);
+    final int count = totalLoans < 3 ? totalLoans : normalizedTargetCount.clamp(3, totalLoans);
     var start = _currentPage - (count ~/ 2);
     var end = start + count - 1;
 
@@ -1165,10 +1077,10 @@ class _ClientLoansSheetState extends State<_ClientLoansSheet> {
       end += -start;
       start = 0;
     }
-    if (end >= widget.loans.length) {
-      final shift = end - widget.loans.length + 1;
-      start = (start - shift).clamp(0, widget.loans.length - 1);
-      end = widget.loans.length - 1;
+    if (end >= totalLoans) {
+      final shift = end - totalLoans + 1;
+      start = (start - shift).clamp(0, totalLoans - 1);
+      end = totalLoans - 1;
     }
 
     return List<int>.generate(end - start + 1, (index) => start + index);
@@ -1176,196 +1088,185 @@ class _ClientLoansSheetState extends State<_ClientLoansSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final currentLoan = widget.loans.isEmpty
-        ? null
-        : widget.loans[_currentPage.clamp(0, widget.loans.length - 1)];
+    return StreamBuilder<List<Loan>>(
+      stream: widget.loanStream,
+      builder: (context, snapshot) {
+        final loans = snapshot.data ?? const <Loan>[];
+        if (loans.isEmpty) {
+          _currentPage = 0;
+        } else if (_currentPage >= loans.length) {
+          _currentPage = loans.length - 1;
+        }
+        final currentLoan = loans.isEmpty ? null : loans[_currentPage.clamp(0, loans.length - 1)];
 
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        widget.client.name,
-                        style: Theme.of(context).textTheme.titleLarge,
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(widget.client.name, style: Theme.of(context).textTheme.titleLarge),
+                          const SizedBox(height: 4),
+                          Text(
+                            Formatters.phone(widget.client.phone),
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        Formatters.phone(widget.client.phone),
-                        style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    if (currentLoan != null) ...[
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            currentLoan.displayTitle,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.end,
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                        ),
                       ),
                     ],
-                  ),
+                  ],
                 ),
-                if (currentLoan != null) ...[
-                  const SizedBox(width: 12),
+                const SizedBox(height: 12),
+                if (loans.isEmpty)
                   Expanded(
-                    child: Align(
-                      alignment: Alignment.centerRight,
+                    child: Center(
                       child: Text(
-                        currentLoan.displayTitle,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.end,
-                        style: Theme.of(context).textTheme.titleSmall,
+                        'У клиента пока нет займов',
+                        style: Theme.of(context).textTheme.bodyMedium,
                       ),
+                    ),
+                  )
+                else ...[
+                  Expanded(
+                    child: PageView.builder(
+                      controller: _pageController,
+                      itemCount: loans.length,
+                      onPageChanged: (page) {
+                        setState(() {
+                          _currentPage = page;
+                        });
+                      },
+                      itemBuilder: (context, index) {
+                        final loan = loans[index];
+                        return LayoutBuilder(
+                          builder: (context, constraints) {
+                            return SingleChildScrollView(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(minHeight: constraints.maxHeight - 8),
+                                child: Center(
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(maxWidth: 720),
+                                    child: _LoanPreviewCard(
+                                      loan: loan,
+                                      onEdit: () => widget.onEditLoan(loan),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).cardColor,
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final indicatorCapacity = ((constraints.maxWidth - 120) / 16).floor().clamp(
+                          3,
+                          9,
+                        );
+                        final visibleIndexes = _visibleIndicatorIndexes(indicatorCapacity, loans.length);
+
+                        return Row(
+                          children: [
+                            OutlinedButton(
+                              onPressed: _currentPage == 0 ? null : () => _goToPage(_currentPage - 1),
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: const Size(40, 40),
+                                padding: EdgeInsets.zero,
+                              ),
+                              child: const Icon(Icons.arrow_back_rounded),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    '${_currentPage + 1} / ${loans.length}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context).textTheme.titleSmall,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Wrap(
+                                    alignment: WrapAlignment.center,
+                                    spacing: 6,
+                                    runSpacing: 6,
+                                    children: visibleIndexes.map((pageIndex) {
+                                      final isActive = pageIndex == _currentPage;
+                                      return AnimatedContainer(
+                                        duration: const Duration(milliseconds: 180),
+                                        width: isActive ? 20 : 8,
+                                        height: 8,
+                                        decoration: BoxDecoration(
+                                          color: isActive
+                                              ? Theme.of(context).colorScheme.secondary
+                                              : Theme.of(
+                                                  context,
+                                                ).colorScheme.secondary.withValues(alpha: 0.28),
+                                          borderRadius: BorderRadius.circular(999),
+                                        ),
+                                      );
+                                    }).toList(),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            OutlinedButton(
+                              onPressed: _currentPage >= loans.length - 1
+                                  ? null
+                                  : () => _goToPage(_currentPage + 1),
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: const Size(40, 40),
+                                padding: EdgeInsets.zero,
+                              ),
+                              child: const Icon(Icons.arrow_forward_rounded),
+                            ),
+                          ],
+                        );
+                      },
                     ),
                   ),
                 ],
               ],
             ),
-            const SizedBox(height: 12),
-            if (widget.loans.isEmpty)
-              Expanded(
-                child: Center(
-                    child: Text(
-                      'У клиента пока нет займов',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                  ),
-                )
-              else ...[
-                Expanded(
-                  child: PageView.builder(
-                    controller: _pageController,
-                    itemCount: widget.loans.length,
-                  onPageChanged: (page) {
-                    setState(() {
-                      _currentPage = page;
-                    });
-                  },
-                    itemBuilder: (context, index) {
-                      final loan = widget.loans[index];
-                      return LayoutBuilder(
-                        builder: (context, constraints) {
-                          return SingleChildScrollView(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: ConstrainedBox(
-                              constraints: BoxConstraints(
-                                minHeight: constraints.maxHeight - 8,
-                              ),
-                              child: Center(
-                                child: ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    maxWidth: 720,
-                                  ),
-                                  child: _LoanPreviewCard(
-                                    loan: loan,
-                                    onEdit: () => widget.onEditLoan(loan),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).cardColor,
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final indicatorCapacity =
-                          ((constraints.maxWidth - 120) / 16).floor().clamp(
-                                3,
-                                9,
-                              );
-                      final visibleIndexes = _visibleIndicatorIndexes(
-                        indicatorCapacity,
-                      );
-
-                      return Row(
-                        children: [
-                          OutlinedButton(
-                            onPressed: _currentPage == 0
-                                ? null
-                                : () => _goToPage(_currentPage - 1),
-                            style: OutlinedButton.styleFrom(
-                              minimumSize: const Size(40, 40),
-                              padding: EdgeInsets.zero,
-                            ),
-                            child: const Icon(Icons.arrow_back_rounded),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  '${_currentPage + 1} / ${widget.loans.length}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.titleSmall,
-                                ),
-                                const SizedBox(height: 8),
-                                Wrap(
-                                  alignment: WrapAlignment.center,
-                                  spacing: 6,
-                                  runSpacing: 6,
-                                  children: visibleIndexes.map((pageIndex) {
-                                    final isActive = pageIndex == _currentPage;
-                                    return AnimatedContainer(
-                                      duration: const Duration(
-                                        milliseconds: 180,
-                                      ),
-                                      width: isActive ? 20 : 8,
-                                      height: 8,
-                                      decoration: BoxDecoration(
-                                        color: isActive
-                                            ? Theme.of(
-                                                context,
-                                              ).colorScheme.secondary
-                                            : Theme.of(context)
-                                                .colorScheme
-                                                .secondary
-                                                .withValues(alpha: 0.28),
-                                        borderRadius: BorderRadius.circular(999),
-                                      ),
-                                    );
-                                  }).toList(),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          OutlinedButton(
-                            onPressed: _currentPage >= widget.loans.length - 1
-                                ? null
-                                : () => _goToPage(_currentPage + 1),
-                            style: OutlinedButton.styleFrom(
-                              minimumSize: const Size(40, 40),
-                              padding: EdgeInsets.zero,
-                            ),
-                            child: const Icon(Icons.arrow_forward_rounded),
-                          ),
-                        ],
-                      );
-                    },
-                  ),
-                ),
-            ],
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }
@@ -1391,9 +1292,7 @@ class _DashedCardBorderPainter extends CustomPainter {
     for (final metric in path.computeMetrics()) {
       var distance = 0.0;
       while (distance < metric.length) {
-        final next = (distance + dashWidth)
-            .clamp(0.0, metric.length)
-            .toDouble();
+        final next = (distance + dashWidth).clamp(0.0, metric.length).toDouble();
         canvas.drawPath(metric.extractPath(distance, next), paint);
         distance += dashWidth + dashGap;
       }
@@ -1425,8 +1324,7 @@ class AdminDashboard extends StatefulWidget {
   final PaymentSettings paymentSettings;
   final LoanDefaultsSettings loanDefaults;
   final Future<void> Function(List<AppUser> clients) onDeleteClients;
-  final Future<void> Function({required String name, required String phone})
-  onCreateClient;
+  final Future<void> Function({required String name, required String phone}) onCreateClient;
   final Future<void> Function({
     required String userId,
     required String title,
@@ -1434,6 +1332,7 @@ class AdminDashboard extends StatefulWidget {
     required double interestPercent,
     required double totalAmount,
     required double dailyPenaltyAmount,
+    required DateTime issuedAt,
     required List<PaymentScheduleItem> schedule,
     String? note,
   })
@@ -1467,8 +1366,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       builder: (context) {
         final mediaQuery = MediaQuery.of(context);
-        final availableHeight =
-            mediaQuery.size.height - mediaQuery.padding.top - 12;
+        final availableHeight = mediaQuery.size.height - mediaQuery.padding.top - 12;
         return SizedBox(
           height: availableHeight,
           child: _ProfitBreakdownSheet(
@@ -1486,9 +1384,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Нет клиентов для удаления')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Нет клиентов для удаления')));
       return;
     }
 
@@ -1508,10 +1406,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Удаление клиентов',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
+                    Text('Удаление клиентов', style: Theme.of(context).textTheme.titleLarge),
                     const SizedBox(height: 8),
                     const Text('Выберите клиентов, которых нужно удалить'),
                     const SizedBox(height: 16),
@@ -1529,13 +1424,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
                           return CheckboxListTile(
                             value: isSelected,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(18),
-                            ),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
                             title: Text(client.name),
                             subtitle: Text(
                               '${Formatters.phone(client.phone)} • Займов: $loansCount',
@@ -1561,10 +1451,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             ? null
                             : () async {
                                 final clientsToDelete = widget.clients
-                                    .where(
-                                      (client) =>
-                                          selectedIds.contains(client.id),
-                                    )
+                                    .where((client) => selectedIds.contains(client.id))
                                     .toList();
 
                                 final confirmed = await showDialog<bool>(
@@ -1576,18 +1463,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                     ),
                                     actions: [
                                       TextButton(
-                                        onPressed: () =>
-                                            Navigator.of(context).pop(false),
+                                        onPressed: () => Navigator.of(context).pop(false),
                                         child: const Text('Отмена'),
                                       ),
                                       FilledButton(
                                         style: FilledButton.styleFrom(
-                                          backgroundColor: const Color(
-                                            0xFFE85B5B,
-                                          ),
+                                          backgroundColor: const Color(0xFFE85B5B),
                                         ),
-                                        onPressed: () =>
-                                            Navigator.of(context).pop(true),
+                                        onPressed: () => Navigator.of(context).pop(true),
                                         child: const Text('Удалить навсегда'),
                                       ),
                                     ],
@@ -1621,9 +1504,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Удалено клиентов: ${confirmedClients.length}')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Удалено клиентов: ${confirmedClients.length}')));
   }
 
   @override
@@ -1678,70 +1561,93 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Future<void> _pickClientFromContacts() async {
-    final contact = await FlutterContacts.openExternalPick();
-    if (contact == null || !mounted) {
-      return;
+    try {
+      final contact = await FlutterContacts.openExternalPick();
+
+      if (contact == null || !mounted) {
+        return;
+      }
+
+      final normalizedPhone = contact.phones
+          .map((entry) => entry.number)
+          .map(_normalizeImportedPhone)
+          .firstWhere(
+            (value) => value.isNotEmpty && Validators.phone(value) == null,
+            orElse: () => '',
+          );
+
+      final name = contact.displayName.trim();
+
+      final nameError = Validators.name(name);
+      final phoneError = normalizedPhone.isEmpty ? 'У контакта нет корректного номера' : null;
+
+      if (nameError != null || phoneError != null) {
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(nameError ?? phoneError!)));
+        return;
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _clientNameController.text = name;
+        _clientPhoneController.text = _formatImportedPhone(normalizedPhone);
+      });
+    } on PlatformException catch (e, st) {
+      debugPrint('Ошибка платформы при выборе контакта: ${e.code}');
+      debugPrint('Message: ${e.message}');
+      debugPrintStack(stackTrace: st);
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Не удалось открыть контакты')));
+    } catch (e, st) {
+      debugPrint('Ошибка выбора контакта: $e');
+      debugPrintStack(stackTrace: st);
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Не удалось выбрать контакт')));
     }
-
-    final normalizedPhone = contact.phones
-        .map((entry) => entry.number)
-        .map(_normalizeImportedPhone)
-        .firstWhere(
-          (value) => value.isNotEmpty && Validators.phone(value) == null,
-          orElse: () => '',
-        );
-    final name = contact.displayName.trim();
-
-    final nameError = Validators.name(name);
-    final phoneError =
-        normalizedPhone.isEmpty ? 'У контакта нет корректного номера' : null;
-    if (nameError != null || phoneError != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(nameError ?? phoneError!)),
-      );
-      return;
-    }
-
-    setState(() {
-      _clientNameController.text = name;
-      _clientPhoneController.text =
-          _formatImportedPhone(normalizedPhone);
-    });
   }
 
-  String _normalizeImportedPhone(String rawValue) {
-    final digits = rawValue.replaceAll(RegExp(r'\D'), '');
-    if (digits.isEmpty) {
-      return '';
-    }
-    if (digits.length == 11 && digits.startsWith('7')) {
-      return digits;
-    }
+  String _normalizeImportedPhone(String value) {
+    var digits = value.replaceAll(RegExp(r'\D'), '');
+
     if (digits.length == 11 && digits.startsWith('8')) {
-      return '7${digits.substring(1)}';
+      digits = '7${digits.substring(1)}';
     }
+
     if (digits.length == 10) {
-      return '7$digits';
+      digits = '7$digits';
     }
-    return '';
+
+    return digits;
   }
 
-  String _formatImportedPhone(String normalizedPhone) {
-    if (normalizedPhone.length != 11 || !normalizedPhone.startsWith('7')) {
-      return normalizedPhone;
+  String _formatImportedPhone(String value) {
+    final digits = value.replaceAll(RegExp(r'\D'), '');
+
+    if (digits.length != 11 || !digits.startsWith('7')) {
+      return value;
     }
-    final digits = normalizedPhone.substring(1);
-    return '+7 (${digits.substring(0, 3)}) '
-        '${digits.substring(3, 6)}-'
-        '${digits.substring(6, 8)}-'
-        '${digits.substring(8, 10)}';
+
+    return '+7 (${digits.substring(1, 4)}) '
+        '${digits.substring(4, 7)}-'
+        '${digits.substring(7, 9)}-'
+        '${digits.substring(9, 11)}';
   }
 
   @override
   Widget build(BuildContext context) {
-    final activeLoans = widget.loans
-        .where((loan) => loan.status == 'active')
-        .toList();
+    final activeLoans = widget.loans.where((loan) => loan.status == 'active').toList();
     final activeClientIds = activeLoans.map((loan) => loan.userId).toSet();
 
     final totalPortfolio = widget.loans.fold<double>(
@@ -1768,8 +1674,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
     final activePortfolioWithoutPenalty = activeLoans.fold<double>(
       0,
-      (portfolioSum, loan) =>
-          portfolioSum + (loan.plannedTotalAmount - loan.plannedPaidAmount),
+      (portfolioSum, loan) => portfolioSum + (loan.plannedTotalAmount - loan.plannedPaidAmount),
     );
     final receivedPortfolioWithoutPenalty = Formatters.centsUp(
       (totalPortfolio - activePortfolioWithoutPenalty).clamp(0, double.infinity),
@@ -1780,22 +1685,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
     final totalPotentialProfit = widget.loans.fold<double>(
       0,
-      (profitSum, loan) => profitSum + (
-        loan.status == 'closed'
-            ? (loan.interestPaid + loan.penaltyPaid)
-            : (loan.plannedInterestAmount +
-                loan.penaltyOutstanding +
-                loan.penaltyPaid)
-      ),
+      (profitSum, loan) =>
+          profitSum +
+          (loan.status == 'closed'
+              ? (loan.interestPaid + loan.penaltyPaid)
+              : (loan.plannedInterestAmount + loan.penaltyOutstanding + loan.penaltyPaid)),
     );
     final actualEarnedProfit = widget.loans.fold<double>(
       0,
       (profitSum, loan) => profitSum + loan.interestPaid + loan.penaltyPaid,
     );
-    final remainingProfit = (totalPotentialProfit - actualEarnedProfit).clamp(
-      0,
-      double.infinity,
-    );
+    final remainingProfit = (totalPotentialProfit - actualEarnedProfit).clamp(0, double.infinity);
     final clientById = {for (final client in widget.clients) client.id: client};
     final plannedProfitByClient = <String, double>{};
     final receivedProfitByClient = <String, double>{};
@@ -1803,14 +1703,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
     for (final loan in widget.loans) {
       final plannedProfit = loan.status == 'closed'
           ? (loan.interestPaid + loan.penaltyPaid)
-          : (loan.plannedInterestAmount +
-              loan.penaltyOutstanding +
-              loan.penaltyPaid);
+          : (loan.plannedInterestAmount + loan.penaltyOutstanding + loan.penaltyPaid);
       final receivedProfit = loan.interestPaid + loan.penaltyPaid;
-      final remainingClientProfit = math.max(
-        plannedProfit - receivedProfit,
-        0,
-      ).toDouble();
+      final remainingClientProfit = math.max(plannedProfit - receivedProfit, 0).toDouble();
 
       plannedProfitByClient.update(
         loan.userId,
@@ -1829,20 +1724,22 @@ class _AdminDashboardState extends State<AdminDashboard> {
       );
     }
     List<_ProfitBreakdownEntry> toEntries(Map<String, double> source) {
-      final entries = source.entries
-          .map(
-            (entry) => _ProfitBreakdownEntry(
-              clientId: entry.key,
-              clientName: clientById[entry.key]?.name ?? 'Клиент',
-              clientPhone: clientById[entry.key]?.phone,
-              amount: Formatters.centsUp(entry.value).toDouble(),
-            ),
-          )
-          .where((entry) => entry.amount > 0)
-          .toList()
-        ..sort((a, b) => b.amount.compareTo(a.amount));
+      final entries =
+          source.entries
+              .map(
+                (entry) => _ProfitBreakdownEntry(
+                  clientId: entry.key,
+                  clientName: clientById[entry.key]?.name ?? 'Клиент',
+                  clientPhone: clientById[entry.key]?.phone,
+                  amount: Formatters.centsUp(entry.value).toDouble(),
+                ),
+              )
+              .where((entry) => entry.amount > 0)
+              .toList()
+            ..sort((a, b) => b.amount.compareTo(a.amount));
       return entries;
     }
+
     final plannedProfitEntries = toEntries(plannedProfitByClient);
     final receivedProfitEntries = toEntries(receivedProfitByClient);
     final remainingProfitEntries = toEntries(remainingProfitByClient);
@@ -1874,9 +1771,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     ),
                     _CompactMetricItem(
                       label: 'арх',
-                      value:
-                          (widget.clients.length - activeClientIds.length)
-                              .toString(),
+                      value: (widget.clients.length - activeClientIds.length).toString(),
                       color: Theme.of(context).colorScheme.primary,
                     ),
                   ],
@@ -1904,8 +1799,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     ),
                     _CompactMetricItem(
                       label: 'закр',
-                      value:
-                          (widget.loans.length - activeLoans.length).toString(),
+                      value: (widget.loans.length - activeLoans.length).toString(),
                       color: Theme.of(context).colorScheme.primary,
                     ),
                   ],
@@ -1938,10 +1832,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     _CompactMetricItem(
                       label: 'опл',
                       value: Formatters.money(
-                        widget.loans.fold<double>(
-                          0,
-                          (sum, loan) => sum + loan.penaltyPaid,
-                        ),
+                        widget.loans.fold<double>(0, (sum, loan) => sum + loan.penaltyPaid),
                       ),
                       color: Theme.of(context).colorScheme.primary,
                     ),
@@ -2021,10 +1912,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Создать клиента',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
+                Text('Создать клиента', style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 16),
                 OutlinedButton.icon(
                   onPressed: _pickClientFromContacts,
@@ -2056,16 +1944,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ElevatedButton.icon(
                   onPressed: () async {
                     final messenger = ScaffoldMessenger.of(context);
-                    final nameError = Validators.name(
-                      _clientNameController.text,
-                    );
-                    final phoneError = Validators.phone(
-                      _clientPhoneController.text,
-                    );
+                    final nameError = Validators.name(_clientNameController.text);
+                    final phoneError = Validators.phone(_clientPhoneController.text);
                     if (nameError != null || phoneError != null) {
-                      messenger.showSnackBar(
-                        SnackBar(content: Text(nameError ?? phoneError!)),
-                      );
+                      messenger.showSnackBar(SnackBar(content: Text(nameError ?? phoneError!)));
                       return;
                     }
                     await widget.onCreateClient(
@@ -2079,9 +1961,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     _clientPhoneController.clear();
                     messenger.showSnackBar(
                       const SnackBar(
-                        content: Text(
-                          'Клиент создан, пароль он задаст при первом входе',
-                        ),
+                        content: Text('Клиент создан, пароль он задаст при первом входе'),
                       ),
                     );
                   },
@@ -2099,10 +1979,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Реквизиты оплаты',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
+                Text('Реквизиты оплаты', style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 16),
                 TextField(
                   controller: _bankNameController,
@@ -2158,10 +2035,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            'Управление займами',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
+                          Text('Управление займами', style: Theme.of(context).textTheme.titleLarge),
                           const SizedBox(height: 8),
                           const Text(
                             'Создавайте займы, редактируйте график, сумму возврата, процент и пеню',
@@ -2211,18 +2085,14 @@ class _LoanPreviewCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isClosed = loan.status == 'closed';
-    final statusColor = isClosed
-        ? Theme.of(context).colorScheme.primary
-        : const Color(0xFFFFC26B);
+    final statusColor = isClosed ? Theme.of(context).colorScheme.primary : const Color(0xFFFFC26B);
     final nextUnpaid = loan.nextUnpaid;
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Theme.of(
-          context,
-        ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
+        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(22),
         border: Border.all(
           color: isClosed
@@ -2235,24 +2105,18 @@ class _LoanPreviewCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              _TagChip(
-                label: isClosed ? 'Выплачен' : 'В процессе',
-                color: statusColor,
-              ),
+              _TagChip(label: isClosed ? 'Выплачен' : 'В процессе', color: statusColor),
               const Spacer(),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      'Плановый остаток',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      Formatters.money(loan.plannedOutstandingAmount),
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                  ],
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text('Плановый остаток', style: Theme.of(context).textTheme.bodySmall),
+                  const SizedBox(height: 2),
+                  Text(
+                    Formatters.money(loan.plannedOutstandingAmount),
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ],
               ),
             ],
           ),
@@ -2260,14 +2124,8 @@ class _LoanPreviewCard extends StatelessWidget {
           _PreviewSection(
             title: 'Основные условия',
             children: [
-              _PreviewRow(
-                label: 'Сумма займа',
-                value: Formatters.money(loan.principal),
-              ),
-              _PreviewRow(
-                label: 'Процент',
-                value: '${loan.interestPercent.toStringAsFixed(2)}%',
-              ),
+              _PreviewRow(label: 'Сумма займа', value: Formatters.money(loan.principal)),
+              _PreviewRow(label: 'Процент', value: '${loan.interestPercent.toStringAsFixed(2)}%'),
               _PreviewRow(
                 label: 'К возврату по плану',
                 value: Formatters.money(loan.plannedTotalAmount),
@@ -2294,73 +2152,55 @@ class _LoanPreviewCard extends StatelessWidget {
             title: 'Возврат и начисления',
             accentColor: isClosed ? null : const Color(0xFFFFC26B),
             children: [
-                _PreviewRow(
-                  label: 'Сейчас к закрытию',
-                  value: Formatters.money(loan.fullCloseAmount),
-                  emphasize: true,
+              _PreviewRow(
+                label: 'Сейчас к закрытию',
+                value: Formatters.money(loan.fullCloseAmount),
+                emphasize: true,
+              ),
+              _PreviewRow(label: 'Уплачено всего', value: Formatters.money(loan.paidAmount)),
+              _PreviewRow(label: 'Уплачено процентов', value: Formatters.money(loan.interestPaid)),
+              _PreviewRow(
+                label: 'Пени сейчас',
+                value: Formatters.money(loan.penaltyOutstanding),
+                valueColor: const Color(0xFFFFC26B),
+              ),
+              _PreviewRow(
+                label: 'Пени всего',
+                value: Formatters.money(loan.penaltyOutstanding + loan.penaltyPaid),
+                valueColor: const Color(0xFFFFC26B),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _showAdminScheduleSheet(context, loan),
+                  icon: const Icon(Icons.calendar_view_month_rounded),
+                  label: const Text('График', maxLines: 1, overflow: TextOverflow.ellipsis),
                 ),
-                _PreviewRow(
-                  label: 'Уплачено всего',
-                  value: Formatters.money(loan.paidAmount),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onEdit,
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Ред. займ', maxLines: 1, overflow: TextOverflow.ellipsis),
                 ),
-                _PreviewRow(
-                  label: 'Уплачено процентов',
-                  value: Formatters.money(loan.interestPaid),
-                ),
-                _PreviewRow(
-                  label: 'Пени сейчас',
-                  value: Formatters.money(loan.penaltyOutstanding),
-                  valueColor: const Color(0xFFFFC26B),
-                ),
-                _PreviewRow(
-                  label: 'Пени всего',
-                  value: Formatters.money(loan.penaltyOutstanding + loan.penaltyPaid),
-                  valueColor: const Color(0xFFFFC26B),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _showAdminScheduleSheet(context, loan),
-                    icon: const Icon(Icons.calendar_view_month_rounded),
-                    label: const Text(
-                      'График',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: onEdit,
-                    icon: const Icon(Icons.edit_outlined),
-                    label: const Text(
-                      'Ред. займ',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      );
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 }
 
 Future<void> _showAdminScheduleSheet(BuildContext context, Loan loan) async {
   final orderedSchedule = loan.orderedSchedule;
-  final firstDate = orderedSchedule.isEmpty
-      ? loan.issuedAt
-      : orderedSchedule.first.dueDate;
-  final lastDate = orderedSchedule.isEmpty
-      ? loan.issuedAt
-      : orderedSchedule.last.dueDate;
+  final firstDate = orderedSchedule.isEmpty ? loan.issuedAt : orderedSchedule.first.dueDate;
+  final lastDate = orderedSchedule.isEmpty ? loan.issuedAt : orderedSchedule.last.dueDate;
   final paidDates =
       orderedSchedule.where((item) => item.paidAt != null).map((item) => item.paidAt!).toList()
         ..sort();
@@ -2380,10 +2220,7 @@ Future<void> _showAdminScheduleSheet(BuildContext context, Loan loan) async {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'График платежей',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
+              Text('График платежей', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 6),
               Text(
                 'Выдан ${Formatters.dateTime(loan.issuedAt)}\n'
@@ -2405,11 +2242,7 @@ Future<void> _showAdminScheduleSheet(BuildContext context, Loan loan) async {
                         separatorBuilder: (_, _) => const SizedBox(height: 12),
                         itemBuilder: (context, index) {
                           final item = orderedSchedule[index];
-                          return _AdminScheduleCard(
-                            loan: loan,
-                            item: item,
-                            index: index,
-                          );
+                          return _AdminScheduleCard(loan: loan, item: item, index: index);
                         },
                       ),
               ),
@@ -2422,11 +2255,7 @@ Future<void> _showAdminScheduleSheet(BuildContext context, Loan loan) async {
 }
 
 class _AdminScheduleCard extends StatelessWidget {
-  const _AdminScheduleCard({
-    required this.loan,
-    required this.item,
-    required this.index,
-  });
+  const _AdminScheduleCard({required this.loan, required this.item, required this.index});
 
   final Loan loan;
   final PaymentScheduleItem item;
@@ -2467,10 +2296,9 @@ class _AdminScheduleCard extends StatelessWidget {
               ),
               child: Text(
                 '${index + 1}',
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: accentColor,
-                  fontWeight: FontWeight.w800,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.labelMedium?.copyWith(color: accentColor, fontWeight: FontWeight.w800),
               ),
             ),
           ),
@@ -2503,10 +2331,7 @@ class _AdminScheduleCard extends StatelessWidget {
                   : isDueToday
                   ? 'Сегодня'
                   : 'Ожидается',
-              style: TextStyle(
-                color: accentColor,
-                fontWeight: FontWeight.w600,
-              ),
+              style: TextStyle(color: accentColor, fontWeight: FontWeight.w600),
             ),
           ),
         ],
@@ -2535,6 +2360,7 @@ class LoanEditorSheet extends StatefulWidget {
     required double interestPercent,
     required double totalAmount,
     required double dailyPenaltyAmount,
+    required DateTime issuedAt,
     required List<PaymentScheduleItem> schedule,
     String? note,
   })
@@ -2556,6 +2382,7 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
   final _noteController = TextEditingController();
 
   String? _selectedClientId;
+  late DateTime _issuedAt;
   bool _isSyncing = false;
   late final PageController _pageController;
   late List<_EditableScheduleRow> _scheduleRows;
@@ -2588,13 +2415,12 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
   void _setupInitialState() {
     final loan = widget.existingLoan;
     if (loan != null) {
+      _issuedAt = loan.issuedAt;
       _selectedClientId = loan.userId;
       _principalController.text = Formatters.decimalInput(loan.principal);
       _percentController.text = Formatters.decimalInput(loan.interestPercent);
       _totalController.text = Formatters.decimalInput(loan.plannedTotalAmount);
-      _dailyPenaltyController.text = Formatters.decimalInput(
-        loan.dailyPenaltyAmount,
-      );
+      _dailyPenaltyController.text = Formatters.decimalInput(loan.dailyPenaltyAmount);
       _titleController.text = loan.displayTitle;
       _monthsController.text = loan.schedule.length.toString();
       final inferredInterval = _inferInterval(loan);
@@ -2613,26 +2439,18 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
       return;
     }
 
-    _selectedClientId = widget.clients.isNotEmpty
-        ? widget.clients.first.id
-        : null;
-    _principalController.text = Formatters.decimalInput(
-      widget.defaultSettings.principal,
-    );
-    _percentController.text = Formatters.decimalInput(
-      widget.defaultSettings.interestPercent,
-    );
+    _issuedAt = AppClock.now();
+    _selectedClientId = widget.clients.isNotEmpty ? widget.clients.first.id : null;
+    _principalController.text = Formatters.decimalInput(widget.defaultSettings.principal);
+    _percentController.text = Formatters.decimalInput(widget.defaultSettings.interestPercent);
     _totalController.text = Formatters.decimalInput(0);
     _dailyPenaltyController.text = Formatters.decimalInput(
       widget.defaultSettings.dailyPenaltyAmount,
     );
     _titleController.text = _defaultLoanTitle();
     _monthsController.text = widget.defaultSettings.paymentCount.toString();
-    _intervalCountController.text = widget.defaultSettings.paymentIntervalCount
-        .toString();
-    _intervalUnit = _PaymentIntervalUnitX.fromStorage(
-      widget.defaultSettings.paymentIntervalUnit,
-    );
+    _intervalCountController.text = widget.defaultSettings.paymentIntervalCount.toString();
+    _intervalUnit = _PaymentIntervalUnitX.fromStorage(widget.defaultSettings.paymentIntervalUnit);
     _generateSchedule();
   }
 
@@ -2708,15 +2526,14 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
   }
 
   String _defaultLoanTitle() {
-    final date = widget.existingLoan?.issuedAt ?? AppClock.now();
+    final date = _issuedAt;
     final day = date.day.toString().padLeft(2, '0');
     final month = date.month.toString().padLeft(2, '0');
     final year = date.year.toString();
     return 'Займ $day.$month.$year';
   }
 
-  double get _editorPrincipal =>
-      Formatters.parseDecimal(_principalController.text);
+  double get _editorPrincipal => Formatters.parseDecimal(_principalController.text);
 
   double get _editorPercent => Formatters.parseDecimal(_percentController.text);
 
@@ -2731,18 +2548,13 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
     if (_scheduleRows.isEmpty) {
       return 1;
     }
-    final issuedAt = widget.existingLoan?.issuedAt ?? AppClock.now();
-    final lastDueDate = [..._scheduleRows]
-      ..sort((a, b) => a.dueDate.compareTo(b.dueDate));
-    final days =
-        lastDueDate.last.dueDate.difference(issuedAt).inDays;
+    final issuedAt = _issuedAt;
+    final lastDueDate = [..._scheduleRows]..sort((a, b) => a.dueDate.compareTo(b.dueDate));
+    final days = lastDueDate.last.dueDate.difference(issuedAt).inDays;
     return days <= 0 ? 1 : days;
   }
 
-  Loan _buildEditorPreviewLoan({
-    List<_EditableScheduleRow>? rows,
-    bool plannedOnly = false,
-  }) {
+  Loan _buildEditorPreviewLoan({List<_EditableScheduleRow>? rows, bool plannedOnly = false}) {
     final effectiveRows = rows ?? _scheduleRows;
     final draftSchedule = effectiveRows
         .map(
@@ -2766,24 +2578,19 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
       interestPercent: _editorPercent,
       totalAmount: 0,
       dailyPenaltyAmount: Formatters.parseDecimal(_dailyPenaltyController.text),
-      issuedAt: widget.existingLoan?.issuedAt ?? AppClock.nowForStorage(),
+      issuedAt: AppClock.fromMoscowWallClock(_issuedAt),
       schedule: draftSchedule,
       status: effectiveRows.every((item) => item.isPaid) ? 'closed' : 'active',
       note: _noteController.text.trim().isEmpty ? null : _noteController.text.trim(),
     );
     final hydratedSchedule = preview.orderedSchedule
-        .map(
-          (item) => item.copyWith(
-            amount: preview.amountForItem(item),
-          ),
-        )
+        .map((item) => item.copyWith(amount: preview.amountForItem(item)))
         .toList();
     final hydratedPreview = preview.copyWith(schedule: hydratedSchedule);
     return hydratedPreview.copyWith(totalAmount: hydratedPreview.plannedTotalAmount);
   }
 
-  Loan get _editorPlannedPreviewLoan =>
-      _buildEditorPreviewLoan(plannedOnly: true);
+  Loan get _editorPlannedPreviewLoan => _buildEditorPreviewLoan(plannedOnly: true);
 
   Future<void> _goToPage(int page) async {
     if (!_pageController.hasClients) {
@@ -2815,7 +2622,7 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
     final previousRows = List<_EditableScheduleRow>.from(_scheduleRows);
     final nextRows = <_EditableScheduleRow>[];
 
-    final baseDate = widget.existingLoan?.issuedAt ?? AppClock.now();
+    final baseDate = _issuedAt;
 
     for (var index = 0; index < safeMonths; index++) {
       final previous = index < previousRows.length ? previousRows[index] : null;
@@ -2835,9 +2642,7 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
     _scheduleRows = nextRows;
     final preview = _buildEditorPreviewLoan(plannedOnly: true);
     _scheduleRows = _scheduleRows.map((row) {
-      final item = preview.orderedSchedule.firstWhere(
-        (scheduleItem) => scheduleItem.id == row.id,
-      );
+      final item = preview.orderedSchedule.firstWhere((scheduleItem) => scheduleItem.id == row.id);
       row.amount = preview.principalAmountForItem(item);
       return row;
     }).toList();
@@ -2877,12 +2682,63 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
     }
   }
 
+  void _applyDueDatesToPaidRows() {
+    final previewLoan = _editorPlannedPreviewLoan;
+    final previewItemsById = {
+      for (final item in previewLoan.orderedSchedule) item.id: item,
+    };
+
+    setState(() {
+      for (final row in _scheduleRows) {
+        if (!row.isPaid) {
+          continue;
+        }
+        final previewItem = previewItemsById[row.id];
+        row.paidAt = AppClock.fromMoscowWallClock(row.dueDate);
+        row.penaltyAccrued = 0;
+        row.interestAccruedPaid = previewItem == null
+            ? 0
+            : previewLoan.plannedInterestForItem(previewItem);
+      }
+    });
+  }
+
+  Future<void> _pickIssuedAt() async {
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: _issuedAt,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
+      locale: const Locale('ru', 'RU'),
+    );
+    if (pickedDate == null || !mounted) {
+      return;
+    }
+
+    final previousDefaultTitle = _defaultLoanTitle();
+    setState(() {
+      _issuedAt = DateTime(
+        pickedDate.year,
+        pickedDate.month,
+        pickedDate.day,
+        _issuedAt.hour,
+        _issuedAt.minute,
+        _issuedAt.second,
+        _issuedAt.millisecond,
+        _issuedAt.microsecond,
+      );
+      final currentTitle = _titleController.text.trim();
+      if (currentTitle.isEmpty || currentTitle == previousDefaultTitle) {
+        _titleController.text = _defaultLoanTitle();
+      }
+      _rebuildSchedule();
+    });
+  }
+
   Future<void> _pickPaymentDate(int index, {required bool markPaid}) async {
     final row = _scheduleRows[index];
-    final initialDate = markPaid
-        ? AppClock.now()
-        : (row.paidAt ?? AppClock.now());
-    final firstDate = widget.existingLoan?.issuedAt ?? AppClock.now();
+    final initialDate = markPaid ? AppClock.now() : (row.paidAt ?? AppClock.now());
+    final firstDate = _issuedAt;
     final pickedDate = await showDatePicker(
       context: context,
       initialDate: initialDate,
@@ -2912,29 +2768,21 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
     final principal = Formatters.parseDecimal(_principalController.text);
     final dailyPenalty = Formatters.parseDecimal(_dailyPenaltyController.text);
     if (principal <= 0) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Сумма займа должна быть больше нуля')),
-      );
+      messenger.showSnackBar(const SnackBar(content: Text('Сумма займа должна быть больше нуля')));
       return;
     }
     if (_scheduleRows.isEmpty) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Добавьте хотя бы один платёж')),
-      );
+      messenger.showSnackBar(const SnackBar(content: Text('Добавьте хотя бы один платёж')));
       return;
     }
     final previewLoan = _buildEditorPreviewLoan();
     final schedule = <PaymentScheduleItem>[];
     for (final row in _scheduleRows) {
-      final previewItem = previewLoan.orderedSchedule.firstWhere(
-        (item) => item.id == row.id,
-      );
+      final previewItem = previewLoan.orderedSchedule.firstWhere((item) => item.id == row.id);
       final amount = previewLoan.principalAmountForItem(previewItem);
       if (amount <= 0) {
         messenger.showSnackBar(
-          const SnackBar(
-            content: Text('Сумма каждого платежа должна быть больше нуля'),
-          ),
+          const SnackBar(content: Text('Сумма каждого платежа должна быть больше нуля')),
         );
         return;
       }
@@ -2943,9 +2791,7 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
           id: row.id,
           dueDate: AppClock.fromMoscowWallClock(row.dueDate),
           amount: row.isPaid
-              ? Formatters.centsUp(
-                  amount + row.interestAccruedPaid + row.penaltyAccrued,
-                )
+              ? Formatters.centsUp(amount + row.interestAccruedPaid + row.penaltyAccrued)
               : previewLoan.amountForItem(previewItem),
           principalAmount: Formatters.cents(amount),
           isPaid: row.isPaid,
@@ -2969,6 +2815,7 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
         interestPercent: percent,
         totalAmount: total,
         dailyPenaltyAmount: dailyPenalty,
+        issuedAt: AppClock.fromMoscowWallClock(_issuedAt),
         schedule: schedule,
         note: _noteController.text.trim(),
       );
@@ -2983,6 +2830,7 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
           interestPercent: percent,
           totalAmount: total,
           dailyPenaltyAmount: dailyPenalty,
+          issuedAt: AppClock.fromMoscowWallClock(_issuedAt),
           schedule: schedule,
           note: _noteController.text.trim(),
           status: schedule.every((item) => item.isPaid) ? 'closed' : 'active',
@@ -3044,6 +2892,21 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
+                                InkWell(
+                                  onTap: _pickIssuedAt,
+                                  borderRadius: BorderRadius.circular(16),
+                                  child: InputDecorator(
+                                    decoration: const InputDecoration(
+                                      labelText: 'Дата выдачи',
+                                      prefixIcon: Icon(Icons.event_available_outlined),
+                                    ),
+                                    child: Text(
+                                      Formatters.date(_issuedAt),
+                                      style: Theme.of(context).textTheme.bodyLarge,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
                                 DropdownButtonFormField<String>(
                                   initialValue: _selectedClientId,
                                   decoration: const InputDecoration(
@@ -3065,7 +2928,9 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
                                 const SizedBox(height: 12),
                                 TextField(
                                   controller: _principalController,
-                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                  keyboardType: const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
                                   decoration: const InputDecoration(
                                     labelText: 'Сумма займа',
                                     prefixIcon: Icon(Icons.currency_ruble_outlined),
@@ -3080,7 +2945,9 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
                                     Expanded(
                                       child: TextField(
                                         controller: _percentController,
-                                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                        keyboardType: const TextInputType.numberWithOptions(
+                                          decimal: true,
+                                        ),
                                         decoration: const InputDecoration(
                                           labelText: 'Процент',
                                           prefixIcon: Icon(Icons.percent_outlined),
@@ -3107,7 +2974,9 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
                                     Expanded(
                                       child: TextField(
                                         controller: _dailyPenaltyController,
-                                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                        keyboardType: const TextInputType.numberWithOptions(
+                                          decimal: true,
+                                        ),
                                         decoration: const InputDecoration(
                                           labelText: 'Пеня за день',
                                           prefixIcon: Icon(Icons.warning_amber_rounded),
@@ -3234,20 +3103,28 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
-                              Text(
-                                'Подробно',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
+                              Text('Подробно', style: Theme.of(context).textTheme.bodySmall),
                               Switch.adaptive(
                                 value: _showDetailedSchedule,
-                                onChanged: (value) => setState(
-                                  () => _showDetailedSchedule = value,
-                                ),
+                                onChanged: (value) => setState(() => _showDetailedSchedule = value),
                               ),
                             ],
                           ),
                         ],
                       ),
+                      if (_showDetailedSchedule) ...[
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: OutlinedButton.icon(
+                            onPressed: _scheduleRows.any((row) => row.isPaid)
+                                ? _applyDueDatesToPaidRows
+                                : null,
+                            icon: const Icon(Icons.event_available_outlined),
+                            label: const Text('Оплаченные по сроку'),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 16),
                       Expanded(
                         child: _scheduleRows.isEmpty
@@ -3269,10 +3146,13 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
                                     showDetails: _showDetailedSchedule,
                                     onChanged: (value) async {
                                       if (value) {
-                                        await _pickPaymentDate(
-                                          index,
-                                          markPaid: true,
-                                        );
+                                        if (_showDetailedSchedule) {
+                                          setState(() {
+                                            _setPaidFromIndex(index, true);
+                                          });
+                                        } else {
+                                          await _pickPaymentDate(index, markPaid: true);
+                                        }
                                         return;
                                       }
                                       setState(() {
@@ -3280,10 +3160,7 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
                                       });
                                     },
                                     onEditPaidDate: row.isPaid
-                                        ? () => _pickPaymentDate(
-                                            index,
-                                            markPaid: false,
-                                          )
+                                        ? () => _pickPaymentDate(index, markPaid: false)
                                         : null,
                                   );
                                 },
@@ -3304,10 +3181,7 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
                 Expanded(
                   child: Column(
                     children: [
-                      Text(
-                        '${_currentPage + 1} / 2',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
+                      Text('${_currentPage + 1} / 2', style: Theme.of(context).textTheme.bodySmall),
                       const SizedBox(height: 6),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -3322,7 +3196,9 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
                               decoration: BoxDecoration(
                                 color: isActive
                                     ? Theme.of(context).colorScheme.secondary
-                                    : Theme.of(context).colorScheme.secondary.withValues(alpha: 0.28),
+                                    : Theme.of(
+                                        context,
+                                      ).colorScheme.secondary.withValues(alpha: 0.28),
                                 borderRadius: BorderRadius.circular(999),
                               ),
                             ),
@@ -3344,9 +3220,7 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
               child: ElevatedButton.icon(
                 onPressed: _save,
                 icon: const Icon(Icons.save_outlined),
-                label: Text(
-                  widget.existingLoan == null ? 'Сохранить займ' : 'Сохранить изменения',
-                ),
+                label: Text(widget.existingLoan == null ? 'Сохранить займ' : 'Сохранить изменения'),
               ),
             ),
           ],
@@ -3367,10 +3241,7 @@ class _EditableScheduleRow {
     this.paidAt,
   });
 
-  factory _EditableScheduleRow.fromItem(
-    PaymentScheduleItem item, {
-    required double initialAmount,
-  }) {
+  factory _EditableScheduleRow.fromItem(PaymentScheduleItem item, {required double initialAmount}) {
     return _EditableScheduleRow(
       id: item.id,
       dueDate: item.dueDate,
@@ -3440,10 +3311,9 @@ class _EditorScheduleCard extends StatelessWidget {
               ),
               child: Text(
                 '${index + 1}',
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: accentColor,
-                  fontWeight: FontWeight.w800,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.labelMedium?.copyWith(color: accentColor, fontWeight: FontWeight.w800),
               ),
             ),
           ),
@@ -3458,9 +3328,7 @@ class _EditorScheduleCard extends StatelessWidget {
                       radius: 20,
                       backgroundColor: accentColor.withValues(alpha: 0.18),
                       child: Icon(
-                        row.isPaid
-                            ? Icons.check_rounded
-                            : Icons.calendar_month_outlined,
+                        row.isPaid ? Icons.check_rounded : Icons.calendar_month_outlined,
                         color: accentColor,
                         size: 20,
                       ),
@@ -3495,10 +3363,7 @@ class _EditorScheduleCard extends StatelessWidget {
                               ),
                               if (showDetails)
                                 Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 9,
-                                    vertical: 5,
-                                  ),
+                                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
                                   decoration: BoxDecoration(
                                     color: accentColor.withValues(alpha: 0.14),
                                     borderRadius: BorderRadius.circular(999),
@@ -3506,11 +3371,7 @@ class _EditorScheduleCard extends StatelessWidget {
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Icon(
-                                        Icons.percent_rounded,
-                                        size: 14,
-                                        color: accentColor,
-                                      ),
+                                      Icon(Icons.percent_rounded, size: 14, color: accentColor),
                                       const SizedBox(width: 4),
                                       Text(
                                         '+ ${Formatters.money(interest)}',
@@ -3532,7 +3393,7 @@ class _EditorScheduleCard extends StatelessWidget {
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                          if (row.isPaid && row.paidAt != null) ...[
+                          if (showDetails && row.isPaid && row.paidAt != null) ...[
                             const SizedBox(height: 2),
                             InkWell(
                               onTap: onEditPaidDate,
@@ -3545,11 +3406,7 @@ class _EditorScheduleCard extends StatelessWidget {
                                     style: Theme.of(context).textTheme.bodySmall,
                                   ),
                                   const SizedBox(width: 6),
-                                  Icon(
-                                    Icons.edit_calendar_outlined,
-                                    size: 14,
-                                    color: accentColor,
-                                  ),
+                                  Icon(Icons.edit_calendar_outlined, size: 14, color: accentColor),
                                 ],
                               ),
                             ),
@@ -3557,10 +3414,7 @@ class _EditorScheduleCard extends StatelessWidget {
                           const SizedBox(height: 4),
                           Text(
                             statusLabel,
-                            style: TextStyle(
-                              color: accentColor,
-                              fontWeight: FontWeight.w600,
-                            ),
+                            style: TextStyle(color: accentColor, fontWeight: FontWeight.w600),
                           ),
                         ],
                       ),
@@ -3716,9 +3570,7 @@ class _AdminMetric extends StatelessWidget {
             borderRadius: BorderRadius.circular(24),
             border: onTap == null
                 ? null
-                : Border.all(
-                    color: theme.colorScheme.secondary.withValues(alpha: 0.18),
-                  ),
+                : Border.all(color: theme.colorScheme.secondary.withValues(alpha: 0.18)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -3731,9 +3583,7 @@ class _AdminMetric extends StatelessWidget {
                 title,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
               ),
               if (value.isNotEmpty) ...[
                 const SizedBox(height: 8),
@@ -3762,10 +3612,7 @@ class _AdminMetric extends StatelessWidget {
               if (actionHint != null) ...[
                 const SizedBox(height: 10),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 8,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   decoration: BoxDecoration(
                     color: theme.colorScheme.secondary.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(999),
@@ -3773,11 +3620,7 @@ class _AdminMetric extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(
-                        Icons.touch_app_outlined,
-                        size: 16,
-                        color: theme.colorScheme.secondary,
-                      ),
+                      Icon(Icons.touch_app_outlined, size: 16, color: theme.colorScheme.secondary),
                       const SizedBox(width: 6),
                       Flexible(
                         child: Text(
@@ -3803,11 +3646,7 @@ class _AdminMetric extends StatelessWidget {
 }
 
 class _CompactMetricItem {
-  const _CompactMetricItem({
-    required this.label,
-    required this.value,
-    required this.color,
-  });
+  const _CompactMetricItem({required this.label, required this.value, required this.color});
 
   final String label;
   final String value;
@@ -3839,16 +3678,11 @@ class _CompactMetricLegend extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 6),
-                Text(
-                  item.value,
-                  style: textStyle?.copyWith(fontWeight: FontWeight.w700),
-                ),
+                Text(item.value, style: textStyle?.copyWith(fontWeight: FontWeight.w700)),
                 const SizedBox(width: 4),
                 Text(
                   item.label,
-                  style: textStyle?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                  style: textStyle?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
               ],
             ),
@@ -3895,9 +3729,7 @@ class _StackedMetricLegend extends StatelessWidget {
                   const SizedBox(width: 4),
                   Text(
                     item.value,
-                    style: (isPrimary
-                            ? Theme.of(context).textTheme.titleSmall
-                            : textStyle)
+                    style: (isPrimary ? Theme.of(context).textTheme.titleSmall : textStyle)
                         ?.copyWith(
                           fontWeight: FontWeight.w800,
                           color: isPrimary
@@ -3920,9 +3752,7 @@ class _StackedMetricLegend extends StatelessWidget {
                 Container(
                   height: 1,
                   width: double.infinity,
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.outlineVariant.withValues(alpha: 0.45),
+                  color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.45),
                 ),
               ],
             ],
@@ -3955,21 +3785,13 @@ class _TagChip extends StatelessWidget {
         child: Stack(
           children: [
             Padding(
-              padding: EdgeInsets.fromLTRB(
-                10,
-                6,
-                onTap == null ? 10 : 18,
-                6,
-              ),
+              padding: EdgeInsets.fromLTRB(10, 6, onTap == null ? 10 : 18, 6),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     label,
-                    style: TextStyle(
-                      color: chipColor,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: TextStyle(color: chipColor, fontWeight: FontWeight.w600),
                   ),
                 ],
               ),
@@ -3994,11 +3816,7 @@ class _TagChip extends StatelessWidget {
 
     return Material(
       color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(999),
-        child: body,
-      ),
+      child: InkWell(onTap: onTap, borderRadius: BorderRadius.circular(999), child: body),
     );
   }
 }
@@ -4054,9 +3872,7 @@ class _CompactFilterPill extends StatelessWidget {
               child: Icon(
                 icon,
                 size: 14,
-                color: selected
-                    ? secondary
-                    : Theme.of(context).colorScheme.onSurfaceVariant,
+                color: selected ? secondary : Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(width: 8),
@@ -4094,24 +3910,15 @@ class _CornerFoldPainter extends CustomPainter {
       ..color = color.withValues(alpha: 0.9)
       ..strokeWidth = 1.2
       ..style = PaintingStyle.stroke;
-    canvas.drawLine(
-      Offset(size.width - 5, 3),
-      Offset(size.width - 3, 5),
-      accentPaint,
-    );
+    canvas.drawLine(Offset(size.width - 5, 3), Offset(size.width - 3, 5), accentPaint);
   }
 
   @override
-  bool shouldRepaint(covariant _CornerFoldPainter oldDelegate) =>
-      oldDelegate.color != color;
+  bool shouldRepaint(covariant _CornerFoldPainter oldDelegate) => oldDelegate.color != color;
 }
 
 class _PreviewSection extends StatelessWidget {
-  const _PreviewSection({
-    required this.title,
-    required this.children,
-    this.accentColor,
-  });
+  const _PreviewSection({required this.title, required this.children, this.accentColor});
 
   final String title;
   final List<Widget> children;
@@ -4124,9 +3931,7 @@ class _PreviewSection extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Theme.of(
-          context,
-        ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.28),
+        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.28),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: color.withValues(alpha: 0.14)),
       ),
@@ -4135,9 +3940,7 @@ class _PreviewSection extends StatelessWidget {
         children: [
           Text(
             title,
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 10),
           ...children,
@@ -4166,24 +3969,19 @@ class _PreviewRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final resolvedColor =
-        valueColor ?? Theme.of(context).colorScheme.onSurface;
+    final resolvedColor = valueColor ?? Theme.of(context).colorScheme.onSurface;
     final valueStyle = emphasize
-        ? Theme.of(context).textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.w700,
-            color: resolvedColor,
-          )
-        : Theme.of(context).textTheme.bodyMedium?.copyWith(
-            fontWeight: FontWeight.w600,
-            color: resolvedColor,
-          );
+        ? Theme.of(
+            context,
+          ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700, color: resolvedColor)
+        : Theme.of(
+            context,
+          ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600, color: resolvedColor);
 
     final labelWidget = Text(
       label,
       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-        color: Theme.of(
-          context,
-        ).colorScheme.onSurfaceVariant.withValues(alpha: 0.92),
+        color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.92),
       ),
     );
 
@@ -4206,10 +4004,7 @@ class _PreviewRow extends StatelessWidget {
               children: [
                 labelWidget,
                 const SizedBox(height: 4),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: valueWidget,
-                ),
+                Align(alignment: Alignment.centerRight, child: valueWidget),
               ],
             );
           }
@@ -4220,10 +4015,7 @@ class _PreviewRow extends StatelessWidget {
               Expanded(child: labelWidget),
               const SizedBox(width: 12),
               Flexible(
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: valueWidget,
-                ),
+                child: Align(alignment: Alignment.centerRight, child: valueWidget),
               ),
             ],
           );
@@ -4232,8 +4024,3 @@ class _PreviewRow extends StatelessWidget {
     );
   }
 }
-
-
-
-
-
