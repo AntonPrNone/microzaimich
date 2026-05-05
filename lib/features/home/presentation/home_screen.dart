@@ -417,6 +417,8 @@ class _AdminHomeState extends State<_AdminHome> {
                                         loan,
                                         loanDefaults,
                                       ),
+                                      onDeleteLoan: (loan) =>
+                                          widget.loanRepository.deleteLoan(loan.id),
                                     ),
                                     AdminDashboard(
                                       clients: clients,
@@ -943,7 +945,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       text: Formatters.decimalInput(widget.loanDefaults.principal),
     );
     _percentController = TextEditingController(
-      text: Formatters.decimalInput(widget.loanDefaults.interestPercent),
+      text: Formatters.decimalInputPrecise(widget.loanDefaults.interestPercent),
     );
     _penaltyController = TextEditingController(
       text: Formatters.decimalInput(widget.loanDefaults.dailyPenaltyAmount),
@@ -1009,6 +1011,8 @@ class _SettingsSheetState extends State<_SettingsSheet> {
             )
           : const AppClockSettings.disabled(),
     );
+    await LocalNotificationService.clearReminderCache();
+    await LocalNotificationService.startBackgroundNotifications(widget.user.id);
   }
 
   Future<void> _pickDebugDateTime() async {
@@ -1219,6 +1223,8 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       forAdmin: forAdmin,
       time: picked,
     );
+    await LocalNotificationService.clearReminderCache();
+    await LocalNotificationService.startBackgroundNotifications(widget.user.id);
 
     if (!mounted) {
       return;

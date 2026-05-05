@@ -4,9 +4,7 @@ import '../services/app_clock.dart';
 
 enum AppNotificationType {
   loanAssigned,
-  paymentSubmitted,
   paymentApproved,
-  paymentRejected,
   paymentReminder,
 }
 

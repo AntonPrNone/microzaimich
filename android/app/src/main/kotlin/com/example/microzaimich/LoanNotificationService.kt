@@ -19,6 +19,10 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import java.util.Calendar
 import java.util.Date
+import java.util.TimeZone
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneId
 
 class LoanNotificationService : Service() {
 
@@ -36,6 +40,9 @@ class LoanNotificationService : Service() {
         private const val KEY_ADMIN_REMINDER_MINUTE = "admin_reminder_minute"
         private const val KEY_CLIENT_REMINDER_HOUR = "client_reminder_hour"
         private const val KEY_CLIENT_REMINDER_MINUTE = "client_reminder_minute"
+        private const val FLUTTER_PREFS_NAME = "FlutterSharedPreferences"
+        private const val KEY_CLOCK_DEBUG_ENABLED = "flutter.local_clock_debug_enabled"
+        private const val KEY_CLOCK_DEBUG_NOW = "flutter.local_clock_debug_now"
     }
 
     private val serviceChannelId = "loan_service_status"
@@ -54,11 +61,15 @@ class LoanNotificationService : Service() {
     private var listenerRegistration: ListenerRegistration? = null
     private var loansListenerRegistration: ListenerRegistration? = null
     private lateinit var prefs: SharedPreferences
+    private lateinit var flutterPrefs: SharedPreferences
     private var activeUserId: String? = null
+    private val moscowTimeZone: TimeZone = TimeZone.getTimeZone("Europe/Moscow")
+    private val moscowZoneId: ZoneId = ZoneId.of("Europe/Moscow")
 
     override fun onCreate() {
         super.onCreate()
         prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        flutterPrefs = getSharedPreferences(FLUTTER_PREFS_NAME, Context.MODE_PRIVATE)
         isRunning = true
         createChannels()
     }
@@ -234,7 +245,7 @@ class LoanNotificationService : Service() {
     }
 
     private fun checkClientLoanReminders(userId: String) {
-        val nowCalendar = Calendar.getInstance()
+        val nowCalendar = currentCalendar()
         val reminderHour = prefs.getInt(KEY_CLIENT_REMINDER_HOUR, 10).coerceIn(0, 23)
         val reminderMinute = prefs.getInt(KEY_CLIENT_REMINDER_MINUTE, 0).coerceIn(0, 59)
         val reminderTimeReached = nowCalendar.get(Calendar.HOUR_OF_DAY) > reminderHour ||
@@ -312,7 +323,7 @@ class LoanNotificationService : Service() {
             .addOnSuccessListener { settingsSnapshot ->
                 val reminderHour = prefs.getInt(KEY_ADMIN_REMINDER_HOUR, 18).coerceIn(0, 23)
                 val reminderMinute = prefs.getInt(KEY_ADMIN_REMINDER_MINUTE, 0).coerceIn(0, 59)
-                val nowCalendar = Calendar.getInstance()
+                val nowCalendar = currentCalendar()
                 val shouldSendToday = nowCalendar.get(Calendar.HOUR_OF_DAY) > reminderHour ||
                     (nowCalendar.get(Calendar.HOUR_OF_DAY) == reminderHour &&
                         nowCalendar.get(Calendar.MINUTE) >= reminderMinute)
@@ -321,59 +332,70 @@ class LoanNotificationService : Service() {
                 }
 
                 FirebaseFirestore.getInstance()
-                    .collection("loans")
-                    .whereEqualTo("status", "active")
+                    .collection("users")
                     .get()
-                    .addOnSuccessListener { snapshot ->
-                        val sentReminders = prefs.getStringSet(KEY_SENT_REMINDERS, emptySet())
-                            ?.toMutableSet()
-                            ?: mutableSetOf()
-                        var changed = false
-                        val today = nowCalendar.time
-                        val todayStamp = buildString {
-                            append(nowCalendar.get(Calendar.YEAR))
-                            append((nowCalendar.get(Calendar.MONTH) + 1).toString().padStart(2, '0'))
-                            append(nowCalendar.get(Calendar.DAY_OF_MONTH).toString().padStart(2, '0'))
+                    .addOnSuccessListener { usersSnapshot ->
+                        val clientNames = usersSnapshot.documents.associate { userDoc ->
+                            userDoc.id to (userDoc.getString("name").orEmpty().ifBlank { "Клиент" })
                         }
 
-                        for (document in snapshot.documents) {
-                            val loanLabel = loanLabel(document)
-                            val schedule = document.get("schedule") as? List<*>
-                            if (schedule == null) {
-                                continue
+                        FirebaseFirestore.getInstance()
+                            .collection("loans")
+                            .whereEqualTo("status", "active")
+                            .get()
+                            .addOnSuccessListener { snapshot ->
+                                val sentReminders = prefs.getStringSet(KEY_SENT_REMINDERS, emptySet())
+                                    ?.toMutableSet()
+                                    ?: mutableSetOf()
+                                var changed = false
+                                val today = nowCalendar.time
+                                val todayStamp = buildString {
+                                    append(nowCalendar.get(Calendar.YEAR))
+                                    append((nowCalendar.get(Calendar.MONTH) + 1).toString().padStart(2, '0'))
+                                    append(nowCalendar.get(Calendar.DAY_OF_MONTH).toString().padStart(2, '0'))
+                                }
+
+                                for (document in snapshot.documents) {
+                                    val loanLabel = loanLabel(document)
+                                    val clientName = clientNames[document.getString("userId").orEmpty()]
+                                        ?: "Клиент"
+                                    val schedule = document.get("schedule") as? List<*>
+                                    if (schedule == null) {
+                                        continue
+                                    }
+
+                                    for (row in schedule) {
+                                        val item = row as? Map<*, *> ?: continue
+                                        val isPaid = item["isPaid"] as? Boolean ?: false
+                                        if (isPaid) {
+                                            continue
+                                        }
+                                        val dueDate = parseDueDate(item["dueDate"]) ?: continue
+                                        if (!isSameDay(dueDate, today)) {
+                                            continue
+                                        }
+                                        val scheduleItemId = item["id"] as? String ?: continue
+                                        val amount = (item["amount"] as? Number)?.toDouble() ?: 0.0
+                                        val reminderKey =
+                                            "${document.id}_${scheduleItemId}_admin_due_$todayStamp"
+                                        if (sentReminders.contains(reminderKey)) {
+                                            continue
+                                        }
+
+                                        showReminderNotification(
+                                            reminderKey,
+                                            "У клиента сегодня день платежа",
+                                            "$clientName • $loanLabel: сегодня срок платежа ${formatMoney(amount)}",
+                                        )
+                                        sentReminders.add(reminderKey)
+                                        changed = true
+                                    }
+                                }
+
+                                if (changed) {
+                                    prefs.edit().putStringSet(KEY_SENT_REMINDERS, sentReminders).apply()
+                                }
                             }
-
-                            for (row in schedule) {
-                                val item = row as? Map<*, *> ?: continue
-                                val isPaid = item["isPaid"] as? Boolean ?: false
-                                if (isPaid) {
-                                    continue
-                                }
-                                val dueDate = parseDueDate(item["dueDate"]) ?: continue
-                                if (!isSameDay(dueDate, today)) {
-                                    continue
-                                }
-                                val scheduleItemId = item["id"] as? String ?: continue
-                                val amount = (item["amount"] as? Number)?.toDouble() ?: 0.0
-                                val reminderKey =
-                                    "${document.id}_${scheduleItemId}_admin_due_$todayStamp"
-                                if (sentReminders.contains(reminderKey)) {
-                                    continue
-                                }
-
-                                showReminderNotification(
-                                    reminderKey,
-                                    "У клиента сегодня день платежа",
-                                    "$loanLabel: сегодня срок платежа ${formatMoney(amount)}",
-                                )
-                                sentReminders.add(reminderKey)
-                                changed = true
-                            }
-                        }
-
-                        if (changed) {
-                            prefs.edit().putStringSet(KEY_SENT_REMINDERS, sentReminders).apply()
-                        }
                     }
             }
     }
@@ -389,13 +411,13 @@ class LoanNotificationService : Service() {
 
     private fun parseIsoDate(value: String): Date? {
         return try {
-            Date.from(java.time.Instant.parse(value))
+            Date.from(Instant.parse(value))
         } catch (_: Exception) {
             try {
-                val localDateTime = java.time.LocalDateTime.parse(value)
+                val localDateTime = LocalDateTime.parse(value)
                 Date.from(
                     localDateTime
-                        .atZone(java.time.ZoneId.systemDefault())
+                        .atZone(moscowZoneId)
                         .toInstant()
                 )
             } catch (_: Exception) {
@@ -452,7 +474,7 @@ class LoanNotificationService : Service() {
     private fun loanLabel(document: DocumentSnapshot): String {
         val timestamp = document.getTimestamp("issuedAt")
         val issuedAt = timestamp?.toDate() ?: return "Займ"
-        val calendar = Calendar.getInstance().apply { time = issuedAt }
+        val calendar = Calendar.getInstance(moscowTimeZone).apply { time = issuedAt }
         val day = calendar.get(Calendar.DAY_OF_MONTH).toString().padStart(2, '0')
         val month = (calendar.get(Calendar.MONTH) + 1).toString().padStart(2, '0')
         val year = calendar.get(Calendar.YEAR).toString()
@@ -460,7 +482,7 @@ class LoanNotificationService : Service() {
     }
 
     private fun formatDate(date: java.util.Date): String {
-        val calendar = Calendar.getInstance().apply { time = date }
+        val calendar = Calendar.getInstance(moscowTimeZone).apply { time = date }
         val day = calendar.get(Calendar.DAY_OF_MONTH).toString().padStart(2, '0')
         val month = (calendar.get(Calendar.MONTH) + 1).toString().padStart(2, '0')
         val year = calendar.get(Calendar.YEAR).toString()
@@ -472,17 +494,44 @@ class LoanNotificationService : Service() {
     }
 
     private fun shiftDay(date: java.util.Date, days: Int): java.util.Date {
-        return Calendar.getInstance().apply {
+        return Calendar.getInstance(moscowTimeZone).apply {
             time = date
             add(Calendar.DAY_OF_YEAR, days)
         }.time
     }
 
     private fun isSameDay(first: java.util.Date, second: java.util.Date): Boolean {
-        val firstCalendar = Calendar.getInstance().apply { time = first }
-        val secondCalendar = Calendar.getInstance().apply { time = second }
+        val firstCalendar = Calendar.getInstance(moscowTimeZone).apply { time = first }
+        val secondCalendar = Calendar.getInstance(moscowTimeZone).apply { time = second }
         return firstCalendar.get(Calendar.YEAR) == secondCalendar.get(Calendar.YEAR) &&
             firstCalendar.get(Calendar.DAY_OF_YEAR) == secondCalendar.get(Calendar.DAY_OF_YEAR)
+    }
+
+    private fun currentCalendar(): Calendar {
+        val calendar = Calendar.getInstance(moscowTimeZone)
+        val debugNow = currentDebugNow()
+        if (debugNow != null) {
+            calendar.time = debugNow
+        }
+        return calendar
+    }
+
+    private fun currentDebugNow(): Date? {
+        val debugEnabled = flutterPrefs.getBoolean(KEY_CLOCK_DEBUG_ENABLED, false)
+        if (!debugEnabled) {
+            return null
+        }
+        val raw = flutterPrefs.getString(KEY_CLOCK_DEBUG_NOW, null) ?: return null
+        return try {
+            Date.from(Instant.parse(raw))
+        } catch (_: Exception) {
+            try {
+                val localDateTime = LocalDateTime.parse(raw)
+                Date.from(localDateTime.atZone(moscowZoneId).toInstant())
+            } catch (_: Exception) {
+                null
+            }
+        }
     }
 
     private fun clearDeliveredState() {

@@ -33,6 +33,12 @@ class MainActivity : FlutterActivity() {
                         result.success(null)
                     }
 
+                    "clearReminderCache" -> {
+                        val prefs = getSharedPreferences(servicePrefsName, Context.MODE_PRIVATE)
+                        prefs.edit().remove("sent_reminders").apply()
+                        result.success(null)
+                    }
+
                     "isRunning" -> {
                         result.success(LoanNotificationService.isRunning)
                     }

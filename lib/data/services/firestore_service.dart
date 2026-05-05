@@ -9,9 +9,6 @@ class FirestoreService {
 
   CollectionReference<Map<String, dynamic>> get loans => _db.collection('loans');
 
-  CollectionReference<Map<String, dynamic>> get paymentRequests =>
-      _db.collection('payment_requests');
-
   CollectionReference<Map<String, dynamic>> get notifications =>
       _db.collection('notifications');
 

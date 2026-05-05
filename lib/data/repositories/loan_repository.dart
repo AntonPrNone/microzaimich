@@ -168,6 +168,10 @@ class LoanRepository {
     }
   }
 
+  Future<void> deleteLoan(String loanId) async {
+    await _firestoreService.loans.doc(loanId).delete();
+  }
+
   Future<void> _updateLoan(
     Loan loan,
     List<PaymentScheduleItem> schedule,

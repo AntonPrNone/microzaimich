@@ -39,6 +39,7 @@ class AdminClientsTab extends StatefulWidget {
     required this.hideClosedLoans,
     required this.watchLoansForUser,
     required this.onEditLoan,
+    required this.onDeleteLoan,
   });
 
   final String currentViewerId;
@@ -47,6 +48,7 @@ class AdminClientsTab extends StatefulWidget {
   final bool hideClosedLoans;
   final Stream<List<Loan>> Function(String userId) watchLoansForUser;
   final Future<void> Function(Loan loan) onEditLoan;
+  final Future<void> Function(Loan loan) onDeleteLoan;
 
   @override
   State<AdminClientsTab> createState() => _AdminClientsTabState();
@@ -252,13 +254,14 @@ class _AdminClientsTabState extends State<AdminClientsTab> {
         final availableHeight = mediaQuery.size.height - mediaQuery.padding.top - 12;
         return SizedBox(
           height: availableHeight,
-          child: _ClientLoansSheet(
-            client: client,
-            loanStream: widget.watchLoansForUser(client.id),
-            onEditLoan: widget.onEditLoan,
-          ),
-        );
-      },
+                                child: _ClientLoansSheet(
+                                  client: client,
+                                  loanStream: widget.watchLoansForUser(client.id),
+                                  onEditLoan: widget.onEditLoan,
+                                  onDeleteLoan: widget.onDeleteLoan,
+                                ),
+                              );
+                            },
     );
   }
 
@@ -805,11 +808,13 @@ class _ClientLoansSheet extends StatefulWidget {
     required this.client,
     required this.loanStream,
     required this.onEditLoan,
+    required this.onDeleteLoan,
   });
 
   final AppUser client;
   final Stream<List<Loan>> loanStream;
   final Future<void> Function(Loan loan) onEditLoan;
+  final Future<void> Function(Loan loan) onDeleteLoan;
 
   @override
   State<_ClientLoansSheet> createState() => _ClientLoansSheetState();
@@ -1062,6 +1067,44 @@ class _ClientLoansSheetState extends State<_ClientLoansSheet> {
     );
   }
 
+  Future<void> _confirmDeleteLoan(Loan loan) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Удалить займ'),
+        content: Text(
+          'Удалить "${loan.displayTitle}" у клиента ${widget.client.name}? Это действие нельзя отменить.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFFF8A80),
+              foregroundColor: Colors.black,
+            ),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    await widget.onDeleteLoan(loan);
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Займ "${loan.displayTitle}" удалён')));
+  }
+
   List<int> _visibleIndicatorIndexes(int maxVisible, int totalLoans) {
     if (totalLoans == 0) {
       return const [];
@@ -1173,6 +1216,7 @@ class _ClientLoansSheetState extends State<_ClientLoansSheet> {
                                     child: _LoanPreviewCard(
                                       loan: loan,
                                       onEdit: () => widget.onEditLoan(loan),
+                                      onDelete: () => _confirmDeleteLoan(loan),
                                     ),
                                   ),
                                 ),
@@ -2077,10 +2121,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
 }
 
 class _LoanPreviewCard extends StatelessWidget {
-  const _LoanPreviewCard({required this.loan, required this.onEdit});
+  const _LoanPreviewCard({
+    required this.loan,
+    required this.onEdit,
+    required this.onDelete,
+  });
 
   final Loan loan;
   final VoidCallback onEdit;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -2187,6 +2236,20 @@ class _LoanPreviewCard extends StatelessWidget {
                   onPressed: onEdit,
                   icon: const Icon(Icons.edit_outlined),
                   label: const Text('Ред. займ', maxLines: 1, overflow: TextOverflow.ellipsis),
+                ),
+              ),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 52,
+                child: OutlinedButton(
+                  onPressed: onDelete,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFFF8A80),
+                    side: const BorderSide(color: Color(0x33FF8A80)),
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(52, 40),
+                  ),
+                  child: const Icon(Icons.delete_outline_rounded),
                 ),
               ),
             ],
@@ -2418,7 +2481,7 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
       _issuedAt = loan.issuedAt;
       _selectedClientId = loan.userId;
       _principalController.text = Formatters.decimalInput(loan.principal);
-      _percentController.text = Formatters.decimalInput(loan.interestPercent);
+      _percentController.text = Formatters.decimalInputPrecise(loan.interestPercent);
       _totalController.text = Formatters.decimalInput(loan.plannedTotalAmount);
       _dailyPenaltyController.text = Formatters.decimalInput(loan.dailyPenaltyAmount);
       _titleController.text = loan.displayTitle;
@@ -2442,7 +2505,9 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
     _issuedAt = AppClock.now();
     _selectedClientId = widget.clients.isNotEmpty ? widget.clients.first.id : null;
     _principalController.text = Formatters.decimalInput(widget.defaultSettings.principal);
-    _percentController.text = Formatters.decimalInput(widget.defaultSettings.interestPercent);
+    _percentController.text = Formatters.decimalInputPrecise(
+      widget.defaultSettings.interestPercent,
+    );
     _totalController.text = Formatters.decimalInput(0);
     _dailyPenaltyController.text = Formatters.decimalInput(
       widget.defaultSettings.dailyPenaltyAmount,
@@ -2701,6 +2766,57 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
             : previewLoan.plannedInterestForItem(previewItem);
       }
     });
+  }
+
+  void _applyPlannedFullClose() {
+    final previewLoan = _editorPlannedPreviewLoan;
+    final previewItemsById = {
+      for (final item in previewLoan.orderedSchedule) item.id: item,
+    };
+
+    setState(() {
+      for (final row in _scheduleRows) {
+        final previewItem = previewItemsById[row.id];
+        row.isPaid = true;
+        row.paidAt = AppClock.fromMoscowWallClock(row.dueDate);
+        row.penaltyAccrued = 0;
+        row.interestAccruedPaid = previewItem == null
+            ? 0
+            : previewLoan.plannedInterestForItem(previewItem);
+      }
+    });
+  }
+
+  Future<void> _openScheduleApplyDialog() async {
+    final action = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Проставить'),
+        content: const Text(
+          'Выберите, что именно нужно проставить по плановому графику.',
+        ),
+        actions: [
+          OutlinedButton(
+            onPressed: () => Navigator.of(dialogContext).pop('closed_dates'),
+            child: const Text('Плановые даты в закрытые'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop('full_close'),
+            child: const Text('Полное плановое погашение'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Отмена'),
+          ),
+        ],
+      ),
+    );
+
+    if (action == 'closed_dates') {
+      _applyDueDatesToPaidRows();
+    } else if (action == 'full_close') {
+      _applyPlannedFullClose();
+    }
   }
 
   Future<void> _pickIssuedAt() async {
@@ -3117,11 +3233,11 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
                         Align(
                           alignment: Alignment.centerRight,
                           child: OutlinedButton.icon(
-                            onPressed: _scheduleRows.any((row) => row.isPaid)
-                                ? _applyDueDatesToPaidRows
+                            onPressed: _scheduleRows.isNotEmpty
+                                ? _openScheduleApplyDialog
                                 : null,
                             icon: const Icon(Icons.event_available_outlined),
-                            label: const Text('Оплаченные по сроку'),
+                            label: const Text('Проставить'),
                           ),
                         ),
                       ],

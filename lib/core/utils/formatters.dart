@@ -24,6 +24,16 @@ class Formatters {
     return value.toStringAsFixed(2).replaceAll('.', ',');
   }
 
+  static String decimalInputPrecise(num value) {
+    var text = value.toString().replaceAll('.', ',');
+    if (!text.contains(',')) {
+      return text;
+    }
+    text = text.replaceFirst(RegExp(r'0+$'), '');
+    text = text.replaceFirst(RegExp(r',$'), '');
+    return text;
+  }
+
   static double cents(num value) {
     return double.parse(value.toStringAsFixed(2));
   }

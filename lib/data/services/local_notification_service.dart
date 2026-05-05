@@ -182,6 +182,17 @@ class LocalNotificationService {
     await platform.invokeMethod('stop');
   }
 
+  static Future<void> clearReminderCache() async {
+    if (kIsWeb) {
+      return;
+    }
+    try {
+      await platform.invokeMethod('clearReminderCache');
+    } on MissingPluginException {
+      // Older installed native shells may not expose this method until reinstall.
+    }
+  }
+
   static Future<bool> isRunning() async {
     if (kIsWeb) {
       return false;
