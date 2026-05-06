@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io' show Platform;
 
 import '../../core/utils/formatters.dart';
@@ -19,40 +18,60 @@ class LoanRepository {
   final FirestoreService _firestoreService;
   final NotificationRepository _notificationRepository;
 
+  List<Loan> _mapAndSortLoans(Iterable<dynamic> docs) {
+    final loansById = <String, Loan>{};
+    for (final doc in docs) {
+      loansById[doc.id as String] = Loan.fromMap(doc.id as String, doc.data as Map<String, dynamic>);
+    }
+    final loans = loansById.values.toList()
+      ..sort((a, b) => b.issuedAt.compareTo(a.issuedAt));
+    return loans;
+  }
+
+  int _loanListSignature(List<Loan> loans) {
+    return Object.hashAll(
+      loans.map(
+        (loan) => Object.hash(
+          loan.id,
+          loan.status,
+          loan.issuedAt.millisecondsSinceEpoch,
+          loan.plannedOutstandingAmount,
+          loan.fullCloseAmount,
+          loan.paidAmount,
+          loan.interestPaid,
+          loan.penaltyOutstanding,
+          loan.penaltyPaid,
+          loan.schedule.length,
+          Object.hashAll(
+            loan.schedule.map(
+              (item) => Object.hash(
+                item.id,
+                item.isPaid,
+                item.dueDate.millisecondsSinceEpoch,
+                item.paidAt?.millisecondsSinceEpoch,
+                item.amount,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  bool _sameLoanLists(List<Loan> previous, List<Loan> next) {
+    return _loanListSignature(previous) == _loanListSignature(next);
+  }
+
   Stream<List<Loan>> watchLoansForUser(String userId) {
     if (Platform.isWindows) {
-      return Stream.multi((controller) {
-        Timer? timer;
-        var active = true;
-
-        Future<void> emit() async {
-          try {
-            final docs = await _firestoreService.windowsRest!.listDocuments('loans');
-            final loans = docs
-                .map((doc) => Loan.fromMap(doc.id, doc.data))
-                .where((loan) => loan.userId == userId)
-                .toList()
-              ..sort((a, b) => b.issuedAt.compareTo(a.issuedAt));
-            if (active) {
-              controller.add(loans);
-            }
-          } catch (error, stackTrace) {
-            if (active) {
-              controller.addError(error, stackTrace);
-            }
-          }
-        }
-
-        unawaited(emit());
-        timer = Timer.periodic(
-          const Duration(seconds: 2),
-          (_) => unawaited(emit()),
-        );
-        controller.onCancel = () {
-          active = false;
-          timer?.cancel();
-        };
-      });
+      return _firestoreService.windowsStream!
+          .watchCollectionWhereEqual(
+            'loans',
+            fieldPath: 'userId',
+            isEqualTo: userId,
+          )
+          .map(_mapAndSortLoans)
+          .distinct(_sameLoanLists);
     }
 
     return _firestoreService.loans
@@ -67,35 +86,10 @@ class LoanRepository {
 
   Stream<List<Loan>> watchAllLoans() {
     if (Platform.isWindows) {
-      return Stream.multi((controller) {
-        Timer? timer;
-        var active = true;
-
-        Future<void> emit() async {
-          try {
-            final docs = await _firestoreService.windowsRest!.listDocuments('loans');
-            final loans = docs.map((doc) => Loan.fromMap(doc.id, doc.data)).toList()
-              ..sort((a, b) => b.issuedAt.compareTo(a.issuedAt));
-            if (active) {
-              controller.add(loans);
-            }
-          } catch (error, stackTrace) {
-            if (active) {
-              controller.addError(error, stackTrace);
-            }
-          }
-        }
-
-        unawaited(emit());
-        timer = Timer.periodic(
-          const Duration(seconds: 2),
-          (_) => unawaited(emit()),
-        );
-        controller.onCancel = () {
-          active = false;
-          timer?.cancel();
-        };
-      });
+      return _firestoreService.windowsStream!
+          .watchCollection('loans')
+          .map(_mapAndSortLoans)
+          .distinct(_sameLoanLists);
     }
 
     return _firestoreService.loans.snapshots().map(
@@ -119,7 +113,7 @@ class LoanRepository {
     String? note,
   }) async {
     if (Platform.isWindows) {
-      final created = await _firestoreService.windowsRest!.createDocument('loans', {
+      final created = await _firestoreService.windowsStream!.createDocument('loans', {
         'userId': userId,
         'title': title,
         'principal': principal,
@@ -214,13 +208,13 @@ class LoanRepository {
 
   Future<void> updateLoan(Loan loan) async {
     if (Platform.isWindows) {
-      final previousSnapshot =
-          await _firestoreService.windowsRest!.getDocument('loans/${loan.id}');
+      final previousSnapshot = await _firestoreService.windowsStream!
+          .getDocument('loans/${loan.id}');
       final previousLoan = previousSnapshot == null
           ? null
           : Loan.fromMap(previousSnapshot.id, previousSnapshot.data);
       final isClosed = loan.schedule.every((item) => item.isPaid);
-      await _firestoreService.windowsRest!.updateDocument('loans/${loan.id}', {
+      await _firestoreService.windowsStream!.updateDocument('loans/${loan.id}', {
         ...loan.toMap(),
         'status': isClosed ? 'closed' : loan.status,
       });
@@ -314,9 +308,13 @@ class LoanRepository {
 
   Future<void> deleteLoansForUser(String userId) async {
     if (Platform.isWindows) {
-      final docs = await _firestoreService.windowsRest!.listDocuments('loans');
-      for (final doc in docs.where((doc) => doc.data['userId'] == userId)) {
-        await _firestoreService.windowsRest!.deleteDocument('loans/${doc.id}');
+      final docs = await _firestoreService.windowsStream!.queryDocuments(
+        'loans',
+        whereField: 'userId',
+        isEqualTo: userId,
+      );
+      for (final doc in docs) {
+        await _firestoreService.windowsStream!.deleteDocument('loans/${doc.id}');
       }
       return;
     }
@@ -330,7 +328,7 @@ class LoanRepository {
 
   Future<void> deleteLoan(String loanId) async {
     if (Platform.isWindows) {
-      await _firestoreService.windowsRest!.deleteDocument('loans/$loanId');
+      await _firestoreService.windowsStream!.deleteDocument('loans/$loanId');
       return;
     }
     await _firestoreService.loans.doc(loanId).delete();
@@ -342,7 +340,7 @@ class LoanRepository {
   ) async {
     if (Platform.isWindows) {
       final isClosed = schedule.every((item) => item.isPaid);
-      await _firestoreService.windowsRest!.updateDocument('loans/${loan.id}', {
+      await _firestoreService.windowsStream!.updateDocument('loans/${loan.id}', {
         'schedule': schedule.map((item) => item.toMap()).toList(),
         'status': isClosed ? 'closed' : 'active',
       });

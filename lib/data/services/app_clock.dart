@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io' show Platform;
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/app_clock_settings.dart';
@@ -54,22 +57,31 @@ class AppClock {
   static DateTime nowForStorage() => fromMoscowWallClock(now());
 
   static Future<void> syncServerTime(FirestoreService firestore) async {
+    if (Platform.isWindows) {
+      _serverOffset = Duration.zero;
+      return;
+    }
+
     try {
       final probeRef = firestore.appSettings.doc('_server_clock_probe');
       final before = DateTime.now();
-      await probeRef.set({
-        'serverNow': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-      final snapshot = await probeRef.get();
+      await probeRef
+          .set({
+            'serverNow': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true))
+          .timeout(const Duration(seconds: 8));
+      final snapshot = await probeRef.get().timeout(const Duration(seconds: 8));
       final after = DateTime.now();
       final serverNow = (snapshot.data()?['serverNow'] as Timestamp?)?.toDate();
       if (serverNow == null) {
         return;
       }
-      final midpoint = before.add(
-        Duration(milliseconds: after.difference(before).inMilliseconds ~/ 2),
-      );
+      final midpoint = before.add(Duration(
+        milliseconds: after.difference(before).inMilliseconds ~/ 2,
+      ));
       _serverOffset = serverNow.difference(midpoint);
+    } on TimeoutException {
+      _serverOffset = Duration.zero;
     } on Object {
       _serverOffset = Duration.zero;
     }

@@ -3,6 +3,7 @@ import 'dart:io' show Platform;
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'windows_firestore_rest_service.dart';
+import 'windows_firestore_stream_service.dart';
 
 class FirestoreService {
   FirestoreService({FirebaseFirestore? db}) : _db = db ?? FirebaseFirestore.instance {
@@ -14,6 +15,8 @@ class FirestoreService {
   final FirebaseFirestore _db;
   WindowsFirestoreRestService? get windowsRest =>
       Platform.isWindows ? WindowsFirestoreRestService.instance : null;
+  WindowsFirestoreStreamService? get windowsStream =>
+      Platform.isWindows ? WindowsFirestoreStreamService.instance : null;
 
   CollectionReference<Map<String, dynamic>> get users => _db.collection('users');
 

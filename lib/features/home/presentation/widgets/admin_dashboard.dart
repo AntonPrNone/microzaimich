@@ -12,12 +12,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../core/utils/input_formatters.dart';
 import '../../../../core/utils/validators.dart';
+import '../../../../core/widgets/ad_navigation_shortcuts.dart';
 import '../../../../data/models/app_user.dart';
 import '../../../../data/models/loan.dart';
 import '../../../../data/models/loan_defaults_settings.dart';
 import '../../../../data/models/payment_schedule_item.dart';
 import '../../../../data/models/payment_settings.dart';
 import '../../../../data/services/app_clock.dart';
+
+final Duration _desktopAwareUiDuration =
+    Platform.isWindows ? const Duration(milliseconds: 1) : const Duration(milliseconds: 220);
+final Duration _desktopAwareFastDuration =
+    Platform.isWindows ? const Duration(milliseconds: 1) : const Duration(milliseconds: 180);
 
 enum _ClientQuickFilter {
   overdue('С просрочкой', Icons.warning_amber_rounded, Color(0xFFFFC26B)),
@@ -259,6 +265,7 @@ class _AdminClientsTabState extends State<AdminClientsTab> {
           height: availableHeight,
                                 child: _ClientLoansSheet(
                                   client: client,
+                                  initialLoans: clientLoans,
                                   loanStream: widget.watchLoansForUser(client.id),
                                   onEditLoan: widget.onEditLoan,
                                   onCloseLoan: widget.onCloseLoan,
@@ -281,7 +288,11 @@ class _AdminClientsTabState extends State<AdminClientsTab> {
           return a.issuedAt.compareTo(b.issuedAt);
         });
 
-    Widget buildClientCard(AppUser client, {required int? reorderIndex}) {
+    Widget buildClientCard(
+      AppUser client, {
+      required int? reorderIndex,
+      required String keyPrefix,
+    }) {
       final loans = allClientLoans(client);
       final clientLoans = loans
           .where((loan) => !widget.hideClosedLoans || loan.status == 'active')
@@ -308,7 +319,7 @@ class _AdminClientsTabState extends State<AdminClientsTab> {
       final latestLoanDate = loans.isEmpty ? null : loans.last.issuedAt;
 
       return Padding(
-        key: ValueKey('admin_client_${client.id}'),
+        key: ValueKey('${keyPrefix}_${client.id}'),
         padding: const EdgeInsets.only(bottom: 16),
         child: _AdminClientCard(
           client: client,
@@ -362,7 +373,10 @@ class _AdminClientsTabState extends State<AdminClientsTab> {
       );
     }
 
-    final orderedClients = _applyClientOrder(widget.clients);
+    final uniqueClients = <String, AppUser>{for (final client in widget.clients) client.id: client}
+        .values
+        .toList();
+    final orderedClients = _applyClientOrder(uniqueClients);
     bool matchesFilters(AppUser client) {
       final loans = allClientLoans(client);
       final hasActive = loans.any((loan) => loan.status == 'active');
@@ -479,7 +493,11 @@ class _AdminClientsTabState extends State<AdminClientsTab> {
                   await _saveClientOrder(_clientOrderIds);
                 },
                 itemBuilder: (context, index) {
-                  return buildClientCard(activeClients[index], reorderIndex: index);
+                  return buildClientCard(
+                    activeClients[index],
+                    reorderIndex: index,
+                    keyPrefix: 'admin_client_active',
+                  );
                 },
               ),
             ),
@@ -524,14 +542,20 @@ class _AdminClientsTabState extends State<AdminClientsTab> {
                               padding: const EdgeInsets.only(top: 16),
                               child: Column(
                                 children: archivedClients
-                                    .map((client) => buildClientCard(client, reorderIndex: null))
+                                    .map(
+                                      (client) => buildClientCard(
+                                        client,
+                                        reorderIndex: null,
+                                        keyPrefix: 'admin_client_archived',
+                                      ),
+                                    )
                                     .toList(),
                               ),
                             ),
                             crossFadeState: _archivedClientsExpanded
                                 ? CrossFadeState.showSecond
                                 : CrossFadeState.showFirst,
-                            duration: const Duration(milliseconds: 220),
+                            duration: _desktopAwareUiDuration,
                           ),
                         ],
                       ),
@@ -657,7 +681,7 @@ class _AdminClientCard extends StatelessWidget {
                     ),
                     if (dragIndicator != null)
                       AnimatedContainer(
-                        duration: const Duration(milliseconds: 180),
+                        duration: _desktopAwareFastDuration,
                         curve: Curves.easeOut,
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                         decoration: BoxDecoration(
@@ -677,11 +701,11 @@ class _AdminClientCard extends StatelessWidget {
                 ),
                 ClipRect(
                   child: AnimatedSize(
-                    duration: const Duration(milliseconds: 220),
+                    duration: _desktopAwareUiDuration,
                     curve: Curves.easeInOut,
                     alignment: Alignment.topCenter,
                     child: AnimatedOpacity(
-                      duration: const Duration(milliseconds: 180),
+                      duration: _desktopAwareFastDuration,
                       curve: Curves.easeInOut,
                       opacity: isDragReady ? 1 : 0,
                       child: showDragHint
@@ -787,21 +811,32 @@ class _AdminClientCard extends StatelessWidget {
         ),
         Positioned.fill(
           child: IgnorePointer(
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 180),
-              opacity: isDragReady ? 1 : 0,
-              child: Padding(
-                padding: const EdgeInsets.all(2),
-                child: CustomPaint(
-                  painter: _DashedCardBorderPainter(
-                    color: secondaryColor.withValues(alpha: 0.65),
-                    radius: 26,
-                  ),
-                ),
+              child: AnimatedOpacity(
+                duration: _desktopAwareFastDuration,
+                opacity: isDragReady ? 1 : 0,
+                child: Platform.isWindows
+                    ? Container(
+                        margin: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(26),
+                          border: Border.all(
+                            color: secondaryColor.withValues(alpha: 0.65),
+                            width: 1.5,
+                          ),
+                        ),
+                      )
+                    : Padding(
+                        padding: const EdgeInsets.all(2),
+                        child: CustomPaint(
+                          painter: _DashedCardBorderPainter(
+                            color: secondaryColor.withValues(alpha: 0.65),
+                            radius: 26,
+                          ),
+                        ),
+                      ),
               ),
             ),
           ),
-        ),
       ],
     );
   }
@@ -810,6 +845,7 @@ class _AdminClientCard extends StatelessWidget {
 class _ClientLoansSheet extends StatefulWidget {
   const _ClientLoansSheet({
     required this.client,
+    required this.initialLoans,
     required this.loanStream,
     required this.onEditLoan,
     required this.onCloseLoan,
@@ -817,6 +853,7 @@ class _ClientLoansSheet extends StatefulWidget {
   });
 
   final AppUser client;
+  final List<Loan> initialLoans;
   final Stream<List<Loan>> loanStream;
   final Future<void> Function(Loan loan) onEditLoan;
   final Future<void> Function(Loan loan, {DateTime? paidAt}) onCloseLoan;
@@ -975,17 +1012,23 @@ class _ProfitBreakdownSheetState extends State<_ProfitBreakdownSheet> {
             Text('Заработок по клиентам', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 12),
             Expanded(
-              child: PageView.builder(
-                controller: _pageController,
-                itemCount: pages.length,
-                onPageChanged: (page) => setState(() => _currentPage = page),
-                itemBuilder: (context, index) {
-                  final page = pages[index];
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: _buildPage(context, page.title, page.subtitle, page.entries),
-                  );
-                },
+              child: AdNavigationShortcuts(
+                onPrevious: () => _goToPage(_currentPage - 1),
+                onNext: () => _goToPage(_currentPage + 1),
+                canNavigatePrevious: _currentPage > 0,
+                canNavigateNext: _currentPage < pages.length - 1,
+                child: PageView.builder(
+                  controller: _pageController,
+                  itemCount: pages.length,
+                  onPageChanged: (page) => setState(() => _currentPage = page),
+                  itemBuilder: (context, index) {
+                    final page = pages[index];
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: _buildPage(context, page.title, page.subtitle, page.entries),
+                    );
+                  },
+                ),
               ),
             ),
             const SizedBox(height: 8),
@@ -1048,18 +1091,73 @@ class _ProfitBreakdownSheetState extends State<_ProfitBreakdownSheet> {
 
 class _ClientLoansSheetState extends State<_ClientLoansSheet> {
   late final PageController _pageController;
+  StreamSubscription<List<Loan>>? _loanSubscription;
   int _currentPage = 0;
+  int? _loanPagesSignature;
+  List<Widget> _cachedLoanPages = const [];
+  late List<Loan> _loans;
 
   @override
   void initState() {
     super.initState();
     _pageController = PageController();
+    _loans = _sortLoans(widget.initialLoans);
+    _loanSubscription = widget.loanStream.listen((loans) {
+      if (!mounted) {
+        return;
+      }
+      final sortedLoans = _sortLoans(loans);
+      if (_sameSheetLoans(_loans, sortedLoans)) {
+        return;
+      }
+      setState(() {
+        _loans = sortedLoans;
+      });
+    });
   }
 
   @override
   void dispose() {
+    _loanSubscription?.cancel();
     _pageController.dispose();
     super.dispose();
+  }
+
+  List<Loan> _sortLoans(List<Loan> loans) {
+    final sorted = List<Loan>.from(loans)
+      ..sort((a, b) {
+        final aActive = a.status == 'active';
+        final bActive = b.status == 'active';
+        if (aActive != bActive) {
+          return aActive ? -1 : 1;
+        }
+        return a.issuedAt.compareTo(b.issuedAt);
+      });
+    return sorted;
+  }
+
+  bool _sameSheetLoans(List<Loan> previous, List<Loan> next) {
+    if (identical(previous, next)) {
+      return true;
+    }
+    if (previous.length != next.length) {
+      return false;
+    }
+    for (var index = 0; index < previous.length; index++) {
+      final left = previous[index];
+      final right = next[index];
+      if (left.id != right.id ||
+          left.status != right.status ||
+          left.plannedOutstandingAmount != right.plannedOutstandingAmount ||
+          left.fullCloseAmount != right.fullCloseAmount ||
+          left.paidAmount != right.paidAmount ||
+          left.penaltyOutstanding != right.penaltyOutstanding ||
+          left.penaltyPaid != right.penaltyPaid ||
+          left.schedule.length != right.schedule.length) {
+        return false;
+      }
+    }
+    return true;
   }
 
   Future<void> _goToPage(int page) async {
@@ -1071,6 +1169,63 @@ class _ClientLoansSheetState extends State<_ClientLoansSheet> {
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeInOut,
     );
+  }
+
+  int _computeLoansSignature(List<Loan> loans) {
+    return Object.hashAll(
+      loans.map(
+        (loan) => Object.hash(
+          loan.id,
+          loan.displayTitle,
+          loan.status,
+          loan.plannedOutstandingAmount,
+          loan.fullCloseAmount,
+          loan.paidAmount,
+          loan.interestPaid,
+          loan.penaltyOutstanding,
+          loan.penaltyPaid,
+          loan.schedule.length,
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _loanPagesFor(List<Loan> loans) {
+    final signature = _computeLoansSignature(loans);
+    if (_loanPagesSignature == signature && _cachedLoanPages.length == loans.length) {
+      return _cachedLoanPages;
+    }
+
+    _loanPagesSignature = signature;
+    _cachedLoanPages = loans
+        .map(
+          (loan) => RepaintBoundary(
+            key: ValueKey('client-loan-page-${loan.id}'),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return SingleChildScrollView(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minHeight: constraints.maxHeight - 8),
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 720),
+                        child: _LoanPreviewCard(
+                          loan: loan,
+                          onEdit: () => widget.onEditLoan(loan),
+                          onClose: () => _confirmCloseLoan(loan),
+                          onDelete: () => _confirmDeleteLoan(loan),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        )
+        .toList(growable: false);
+    return _cachedLoanPages;
   }
 
   Future<void> _confirmDeleteLoan(Loan loan) async {
@@ -1169,149 +1324,131 @@ class _ClientLoansSheetState extends State<_ClientLoansSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<List<Loan>>(
-      stream: widget.loanStream,
-      builder: (context, snapshot) {
-        final loans = snapshot.data ?? const <Loan>[];
-        if (loans.isEmpty) {
-          _currentPage = 0;
-        } else if (_currentPage >= loans.length) {
-          _currentPage = loans.length - 1;
-        }
-        final currentLoan = loans.isEmpty ? null : loans[_currentPage.clamp(0, loans.length - 1)];
+    final loans = _loans;
+    if (loans.isEmpty) {
+      _currentPage = 0;
+    } else if (_currentPage >= loans.length) {
+      _currentPage = loans.length - 1;
+    }
+    final currentLoan = loans.isEmpty ? null : loans[_currentPage.clamp(0, loans.length - 1)];
+    final loanPages = _loanPagesFor(loans);
 
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(widget.client.name, style: Theme.of(context).textTheme.titleLarge),
-                          const SizedBox(height: 4),
-                          Text(
-                            Formatters.phone(widget.client.phone),
-                            style: Theme.of(context).textTheme.bodyMedium,
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (currentLoan != null) ...[
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Align(
-                          alignment: Alignment.centerRight,
-                          child: Text(
-                            currentLoan.displayTitle,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.end,
-                            style: Theme.of(context).textTheme.titleSmall,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 12),
-                if (loans.isEmpty)
-                  Expanded(
-                    child: Center(
-                      child: Text(
-                        'У клиента пока нет займов',
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(widget.client.name, style: Theme.of(context).textTheme.titleLarge),
+                      const SizedBox(height: 4),
+                      Text(
+                        Formatters.phone(widget.client.phone),
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
-                    ),
-                  )
-                else ...[
+                    ],
+                  ),
+                ),
+                if (currentLoan != null) ...[
+                  const SizedBox(width: 12),
                   Expanded(
-                    child: PageView.builder(
-                      controller: _pageController,
-                      itemCount: loans.length,
-                      onPageChanged: (page) {
-                        setState(() {
-                          _currentPage = page;
-                        });
-                      },
-                      itemBuilder: (context, index) {
-                        final loan = loans[index];
-                        return LayoutBuilder(
-                          builder: (context, constraints) {
-                            return SingleChildScrollView(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: ConstrainedBox(
-                                constraints: BoxConstraints(minHeight: constraints.maxHeight - 8),
-                                child: Center(
-                                  child: ConstrainedBox(
-                                    constraints: const BoxConstraints(maxWidth: 720),
-                                    child: _LoanPreviewCard(
-                                      loan: loan,
-                                      onEdit: () => widget.onEditLoan(loan),
-                                      onClose: () => _confirmCloseLoan(loan),
-                                      onDelete: () => _confirmDeleteLoan(loan),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                        );
-                      },
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        currentLoan.displayTitle,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.end,
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).cardColor,
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        final indicatorCapacity = ((constraints.maxWidth - 120) / 16).floor().clamp(
-                          3,
-                          9,
-                        );
-                        final visibleIndexes = _visibleIndicatorIndexes(indicatorCapacity, loans.length);
+                ],
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (loans.isEmpty)
+              Expanded(
+                child: Center(
+                  child: Text(
+                    'У клиента пока нет займов',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ),
+              )
+            else ...[
+              Expanded(
+                child: AdNavigationShortcuts(
+                  onPrevious: () => _goToPage(_currentPage - 1),
+                  onNext: () => _goToPage(_currentPage + 1),
+                  canNavigatePrevious: _currentPage > 0,
+                  canNavigateNext: _currentPage < loans.length - 1,
+                  child: PageView(
+                    controller: _pageController,
+                    allowImplicitScrolling: true,
+                    onPageChanged: (page) {
+                      setState(() {
+                        _currentPage = page;
+                      });
+                    },
+                    children: loanPages,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).cardColor,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final indicatorCapacity = ((constraints.maxWidth - 120) / 16).floor().clamp(
+                      3,
+                      9,
+                    );
+                    final visibleIndexes = _visibleIndicatorIndexes(indicatorCapacity, loans.length);
 
-                        return Row(
-                          children: [
-                            OutlinedButton(
-                              onPressed: _currentPage == 0 ? null : () => _goToPage(_currentPage - 1),
-                              style: OutlinedButton.styleFrom(
-                                minimumSize: const Size(40, 40),
-                                padding: EdgeInsets.zero,
+                    return Row(
+                      children: [
+                        OutlinedButton(
+                          onPressed: _currentPage == 0 ? null : () => _goToPage(_currentPage - 1),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(40, 40),
+                            padding: EdgeInsets.zero,
+                          ),
+                          child: const Icon(Icons.arrow_back_rounded),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '${_currentPage + 1} / ${loans.length}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleSmall,
                               ),
-                              child: const Icon(Icons.arrow_back_rounded),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    '${_currentPage + 1} / ${loans.length}',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context).textTheme.titleSmall,
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Wrap(
-                                    alignment: WrapAlignment.center,
-                                    spacing: 6,
-                                    runSpacing: 6,
-                                    children: visibleIndexes.map((pageIndex) {
-                                      final isActive = pageIndex == _currentPage;
-                                      return AnimatedContainer(
-                                        duration: const Duration(milliseconds: 180),
+                              const SizedBox(height: 8),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: visibleIndexes.map((pageIndex) {
+                                  final isActive = pageIndex == _currentPage;
+                                  return SizedBox(
+                                    width: 20,
+                                    child: Center(
+                                      child: AnimatedContainer(
+                                        duration: _desktopAwareFastDuration,
                                         width: isActive ? 20 : 8,
                                         height: 8,
                                         decoration: BoxDecoration(
@@ -1322,34 +1459,34 @@ class _ClientLoansSheetState extends State<_ClientLoansSheet> {
                                                 ).colorScheme.secondary.withValues(alpha: 0.28),
                                           borderRadius: BorderRadius.circular(999),
                                         ),
-                                      );
-                                    }).toList(),
-                                  ),
-                                ],
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            OutlinedButton(
-                              onPressed: _currentPage >= loans.length - 1
-                                  ? null
-                                  : () => _goToPage(_currentPage + 1),
-                              style: OutlinedButton.styleFrom(
-                                minimumSize: const Size(40, 40),
-                                padding: EdgeInsets.zero,
-                              ),
-                              child: const Icon(Icons.arrow_forward_rounded),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        );
-      },
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton(
+                          onPressed: _currentPage >= loans.length - 1
+                              ? null
+                              : () => _goToPage(_currentPage + 1),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(40, 40),
+                            padding: EdgeInsets.zero,
+                          ),
+                          child: const Icon(Icons.arrow_forward_rounded),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }
@@ -2244,8 +2381,7 @@ class _LoanPreviewCard extends StatelessWidget {
     final isClosed = loan.status == 'closed';
     final statusColor = isClosed ? Theme.of(context).colorScheme.primary : const Color(0xFFFFC26B);
     final nextUnpaid = loan.nextUnpaid;
-
-    return Container(
+    final card = Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -2381,6 +2517,12 @@ class _LoanPreviewCard extends StatelessWidget {
         ],
       ),
     );
+
+    if (!Platform.isWindows) {
+      return card;
+    }
+
+    return RepaintBoundary(child: card);
   }
 }
 
@@ -3151,10 +3293,15 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
             ),
             const SizedBox(height: 16),
             Expanded(
-              child: PageView(
-                controller: _pageController,
-                onPageChanged: (page) => setState(() => _currentPage = page),
-                children: [
+              child: AdNavigationShortcuts(
+                onPrevious: () => _goToPage(_currentPage - 1),
+                onNext: () => _goToPage(_currentPage + 1),
+                canNavigatePrevious: _currentPage > 0,
+                canNavigateNext: _currentPage < 1,
+                child: PageView(
+                  controller: _pageController,
+                  onPageChanged: (page) => setState(() => _currentPage = page),
+                  children: [
                   SingleChildScrollView(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -3454,7 +3601,8 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
                       ),
                     ],
                   ),
-                ],
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 12),
@@ -3811,7 +3959,7 @@ class _FlippableAdminMetric extends StatelessWidget {
 
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(end: rotation),
-      duration: const Duration(milliseconds: 420),
+      duration: Platform.isWindows ? const Duration(milliseconds: 1) : const Duration(milliseconds: 420),
       curve: Curves.easeInOutCubic,
       builder: (context, angle, child) {
         final showBack = angle >= math.pi / 2;
@@ -4288,31 +4436,42 @@ class _PreviewRow extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          if (stackWhenNarrow && constraints.maxWidth < 310) {
-            return Column(
+      child: Platform.isWindows
+          ? Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                labelWidget,
-                const SizedBox(height: 4),
-                Align(alignment: Alignment.centerRight, child: valueWidget),
+                Expanded(child: labelWidget),
+                const SizedBox(width: 12),
+                Flexible(
+                  child: Align(alignment: Alignment.centerRight, child: valueWidget),
+                ),
               ],
-            );
-          }
+            )
+          : LayoutBuilder(
+              builder: (context, constraints) {
+                if (stackWhenNarrow && constraints.maxWidth < 310) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      labelWidget,
+                      const SizedBox(height: 4),
+                      Align(alignment: Alignment.centerRight, child: valueWidget),
+                    ],
+                  );
+                }
 
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: labelWidget),
-              const SizedBox(width: 12),
-              Flexible(
-                child: Align(alignment: Alignment.centerRight, child: valueWidget),
-              ),
-            ],
-          );
-        },
-      ),
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: labelWidget),
+                    const SizedBox(width: 12),
+                    Flexible(
+                      child: Align(alignment: Alignment.centerRight, child: valueWidget),
+                    ),
+                  ],
+                );
+              },
+            ),
     );
   }
 }

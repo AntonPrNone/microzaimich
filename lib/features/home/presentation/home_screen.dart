@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/app_snackbar.dart';
+import '../../../core/widgets/ad_navigation_shortcuts.dart';
 import '../../../data/models/app_notification.dart';
 import '../../../data/models/app_clock_settings.dart';
 import '../../../data/models/app_user.dart';
@@ -76,7 +77,7 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-class _ClientHome extends StatelessWidget {
+class _ClientHome extends StatefulWidget {
   const _ClientHome({
     required this.currentUser,
     required this.loanRepository,
@@ -90,9 +91,28 @@ class _ClientHome extends StatelessWidget {
   final NotificationRepository notificationRepository;
 
   @override
+  State<_ClientHome> createState() => _ClientHomeState();
+}
+
+class _ClientHomeState extends State<_ClientHome> {
+  late final Stream<List<Loan>> _loansStream;
+  late final Stream<PaymentSettings> _paymentSettingsStream;
+  late final Stream<List<AppNotification>> _notificationsStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _loansStream = widget.loanRepository.watchLoansForUser(widget.currentUser.id);
+    _paymentSettingsStream = widget.appSettingsRepository.watchPaymentSettings();
+    _notificationsStream = widget.notificationRepository.watchForUser(
+      widget.currentUser.id,
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     return StreamBuilder<List<Loan>>(
-      stream: loanRepository.watchLoansForUser(currentUser.id),
+      stream: _loansStream,
       builder: (context, loansSnapshot) {
         if (!loansSnapshot.hasData) {
           return const Scaffold(
@@ -100,7 +120,7 @@ class _ClientHome extends StatelessWidget {
           );
         }
         return StreamBuilder<PaymentSettings>(
-          stream: appSettingsRepository.watchPaymentSettings(),
+          stream: _paymentSettingsStream,
           builder: (context, settingsSnapshot) {
             if (!settingsSnapshot.hasData) {
               return const Scaffold(
@@ -108,7 +128,7 @@ class _ClientHome extends StatelessWidget {
               );
             }
             return StreamBuilder<List<AppNotification>>(
-              stream: notificationRepository.watchForUser(currentUser.id),
+              stream: _notificationsStream,
               builder: (context, notificationsSnapshot) {
                 if (!notificationsSnapshot.hasData) {
                   return const Scaffold(
@@ -124,13 +144,13 @@ class _ClientHome extends StatelessWidget {
                     title: const Text('Мои займы'),
                     actions: [
                       _NotificationsAction(
-                        user: currentUser,
+                        user: widget.currentUser,
                         notifications: notifications,
-                        notificationRepository: notificationRepository,
+                        notificationRepository: widget.notificationRepository,
                       ),
                       IconButton(
                         tooltip: 'Настройки',
-                        onPressed: () => _showSettingsSheet(context, currentUser),
+                        onPressed: () => _showSettingsSheet(context, widget.currentUser),
                         icon: Icon(
                           Icons.settings_outlined,
                           color: Theme.of(context).colorScheme.secondary,
@@ -149,12 +169,12 @@ class _ClientHome extends StatelessWidget {
                   body: Stack(
                     children: [
                       ClientDashboard(
-                        user: currentUser,
+                        user: widget.currentUser,
                         loans: loans,
                         paymentSettings: settingsSnapshot.data!,
                       ),
                       _NotificationEffects(
-                        user: currentUser,
+                        user: widget.currentUser,
                         loans: loans,
                         notifications: notifications,
                       ),
@@ -195,6 +215,11 @@ class _AdminHome extends StatefulWidget {
 
 class _AdminHomeState extends State<_AdminHome> {
   bool _hideClosedLoans = false;
+  late final Stream<List<AppUser>> _clientsStream;
+  late final Stream<List<Loan>> _allLoansStream;
+  late final Stream<PaymentSettings> _paymentSettingsStream;
+  late final Stream<LoanDefaultsSettings> _loanDefaultsStream;
+  late final Stream<List<AppNotification>> _notificationsStream;
 
   String get _hideClosedLoansKey =>
       'admin_hide_closed_loans_${widget.currentUser.id}';
@@ -202,6 +227,13 @@ class _AdminHomeState extends State<_AdminHome> {
   @override
   void initState() {
     super.initState();
+    _clientsStream = widget.authRepository.watchClients();
+    _allLoansStream = widget.loanRepository.watchAllLoans();
+    _paymentSettingsStream = widget.appSettingsRepository.watchPaymentSettings();
+    _loanDefaultsStream = widget.appSettingsRepository.watchLoanDefaults();
+    _notificationsStream = widget.notificationRepository.watchForUser(
+      widget.currentUser.id,
+    );
     _loadAdminSettings();
   }
 
@@ -290,8 +322,11 @@ class _AdminHomeState extends State<_AdminHome> {
   Widget build(BuildContext context) {
     return DefaultTabController(
       length: 2,
+      animationDuration: Platform.isWindows
+          ? const Duration(milliseconds: 1)
+          : kTabScrollDuration,
       child: StreamBuilder<List<AppUser>>(
-        stream: widget.authRepository.watchClients(),
+        stream: _clientsStream,
         builder: (context, clientsSnapshot) {
           if (!clientsSnapshot.hasData) {
             return const Scaffold(
@@ -299,7 +334,7 @@ class _AdminHomeState extends State<_AdminHome> {
             );
           }
           return StreamBuilder<List<Loan>>(
-            stream: widget.loanRepository.watchAllLoans(),
+            stream: _allLoansStream,
             builder: (context, loansSnapshot) {
               if (!loansSnapshot.hasData) {
                 return const Scaffold(
@@ -307,7 +342,7 @@ class _AdminHomeState extends State<_AdminHome> {
                 );
               }
               return StreamBuilder<PaymentSettings>(
-                stream: widget.appSettingsRepository.watchPaymentSettings(),
+                stream: _paymentSettingsStream,
                 builder: (context, paymentSettingsSnapshot) {
                   if (!paymentSettingsSnapshot.hasData) {
                     return const Scaffold(
@@ -315,7 +350,7 @@ class _AdminHomeState extends State<_AdminHome> {
                     );
                   }
                   return StreamBuilder<LoanDefaultsSettings>(
-                    stream: widget.appSettingsRepository.watchLoanDefaults(),
+                    stream: _loanDefaultsStream,
                     builder: (context, defaultsSnapshot) {
                       if (!defaultsSnapshot.hasData) {
                         return const Scaffold(
@@ -323,9 +358,7 @@ class _AdminHomeState extends State<_AdminHome> {
                         );
                       }
                       return StreamBuilder<List<AppNotification>>(
-                        stream: widget.notificationRepository.watchForUser(
-                          widget.currentUser.id,
-                        ),
+                        stream: _notificationsStream,
                         builder: (context, notificationsSnapshot) {
                           if (!notificationsSnapshot.hasData) {
                             return const Scaffold(
@@ -407,9 +440,25 @@ class _AdminHomeState extends State<_AdminHome> {
                             ),
                             body: Stack(
                               children: [
-                                TabBarView(
-                                  children: [
-                                    AdminClientsTab(
+                                AdNavigationShortcuts(
+                                  onPrevious: () {
+                                    final controller = DefaultTabController.of(context);
+                                    if (controller.index > 0) {
+                                      controller.animateTo(controller.index - 1);
+                                    }
+                                  },
+                                  onNext: () {
+                                    final controller = DefaultTabController.of(context);
+                                    if (controller.index < controller.length - 1) {
+                                      controller.animateTo(controller.index + 1);
+                                    }
+                                  },
+                                  child: TabBarView(
+                                    physics: Platform.isWindows
+                                        ? const NeverScrollableScrollPhysics()
+                                        : null,
+                                    children: [
+                                      AdminClientsTab(
                                       currentViewerId: widget.currentUser.id,
                                       clients: clients,
                                       loans: loans,
@@ -428,7 +477,7 @@ class _AdminHomeState extends State<_AdminHome> {
                                       onDeleteLoan: (loan) =>
                                           widget.loanRepository.deleteLoan(loan.id),
                                     ),
-                                    AdminDashboard(
+                                      AdminDashboard(
                                       clients: clients,
                                       loans: loans,
                                       paymentSettings: paymentSettings,
@@ -488,8 +537,9 @@ class _AdminHomeState extends State<_AdminHome> {
                                       onSavePaymentSettings: widget
                                           .appSettingsRepository
                                           .savePaymentSettings,
-                                    ),
-                                  ],
+                                      ),
+                                    ],
+                                  ),
                                 ),
                                 _NotificationEffects(
                                   user: widget.currentUser,
@@ -1076,15 +1126,29 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       final now = AppClock.now();
       final suggestedName =
           'microzaimich-backup-${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}-${now.minute.toString().padLeft(2, '0')}.json';
-      final tempDir = await getTemporaryDirectory();
-      final backupFile = File('${tempDir.path}/$suggestedName');
-      await backupFile.writeAsString(json, flush: true);
-      await Share.shareXFiles(
+      if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+        final targetPath = await FilePicker.platform.saveFile(
+          dialogTitle: 'Сохранить резервную копию',
+          fileName: suggestedName,
+          type: FileType.custom,
+          allowedExtensions: const ['json'],
+        );
+        if (targetPath == null) {
+          return;
+        }
+        final backupFile = File(targetPath);
+        await backupFile.writeAsString(json, flush: true);
+      } else {
+        final tempDir = await getTemporaryDirectory();
+        final backupFile = File('${tempDir.path}/$suggestedName');
+        await backupFile.writeAsString(json, flush: true);
+        await Share.shareXFiles(
         [XFile(backupFile.path, mimeType: 'application/json')],
         subject: 'Резервная копия Microzaimich',
         text: 'Резервная копия базы данных приложения',
-        fileNameOverrides: [suggestedName],
+      fileNameOverrides: [suggestedName],
       );
+      }
 
       if (!mounted) {
         return;

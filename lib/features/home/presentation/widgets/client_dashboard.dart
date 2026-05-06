@@ -1,6 +1,7 @@
 ﻿import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'dart:io' show Platform;
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -11,6 +12,11 @@ import '../../../../data/models/loan.dart';
 import '../../../../data/models/payment_schedule_item.dart';
 import '../../../../data/models/payment_settings.dart';
 import '../../../../data/services/app_clock.dart';
+
+final Duration _desktopAwareUiDuration =
+    Platform.isWindows ? const Duration(milliseconds: 1) : const Duration(milliseconds: 220);
+final Duration _desktopAwareFastDuration =
+    Platform.isWindows ? const Duration(milliseconds: 1) : const Duration(milliseconds: 180);
 
 class ClientDashboard extends StatefulWidget {
   const ClientDashboard({
@@ -1006,7 +1012,7 @@ class _LoanCard extends StatelessWidget {
                       if (dragIndicator != null) ...[
                         const SizedBox(width: 6),
                         AnimatedContainer(
-                          duration: const Duration(milliseconds: 180),
+                          duration: _desktopAwareFastDuration,
                           curve: Curves.easeOut,
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
@@ -1027,11 +1033,11 @@ class _LoanCard extends StatelessWidget {
                   ),
                   ClipRect(
                     child: AnimatedSize(
-                      duration: const Duration(milliseconds: 220),
+                      duration: _desktopAwareUiDuration,
                       curve: Curves.easeInOut,
                       alignment: Alignment.topCenter,
                       child: AnimatedOpacity(
-                        duration: const Duration(milliseconds: 180),
+                        duration: _desktopAwareFastDuration,
                         curve: Curves.easeInOut,
                         opacity: isDragReady ? 1 : 0,
                         child: showDragHint
@@ -1100,7 +1106,7 @@ class _LoanCard extends StatelessWidget {
                     ),
                   ),
                   AnimatedSize(
-                    duration: const Duration(milliseconds: 220),
+                    duration: _desktopAwareUiDuration,
                     curve: Curves.easeInOut,
                     alignment: Alignment.topCenter,
                     child: isExpanded
@@ -1221,17 +1227,28 @@ class _LoanCard extends StatelessWidget {
             bottom: 0,
             child: IgnorePointer(
               child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 180),
+                duration: _desktopAwareFastDuration,
                 opacity: isDragReady ? 1 : 0,
-                child: Padding(
-                  padding: const EdgeInsets.all(2),
-                  child: CustomPaint(
-                    painter: _DashedCardBorderPainter(
-                      color: secondaryColor.withValues(alpha: 0.65),
-                      radius: 26,
-                    ),
-                  ),
-                ),
+                child: Platform.isWindows
+                    ? Container(
+                        margin: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(26),
+                          border: Border.all(
+                            color: secondaryColor.withValues(alpha: 0.65),
+                            width: 1.5,
+                          ),
+                        ),
+                      )
+                    : Padding(
+                        padding: const EdgeInsets.all(2),
+                        child: CustomPaint(
+                          painter: _DashedCardBorderPainter(
+                            color: secondaryColor.withValues(alpha: 0.65),
+                            radius: 26,
+                          ),
+                        ),
+                      ),
               ),
             ),
           ),

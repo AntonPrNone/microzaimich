@@ -41,9 +41,12 @@ class AuthRepository {
   Future<AuthLookupResult> lookupByPhone(String phone) async {
     final normalizedPhone = normalizePhone(phone);
     if (Platform.isWindows) {
-      final docs = await _firestoreService.windowsRest!.listDocuments('users');
-      final matches =
-          docs.where((doc) => doc.data['phone'] == normalizedPhone).toList();
+      final matches = await _firestoreService.windowsStream!.queryDocuments(
+        'users',
+        whereField: 'phone',
+        isEqualTo: normalizedPhone,
+        limit: 1,
+      );
       if (matches.isEmpty) {
         return const AuthLookupResult(
           user: null,
@@ -86,7 +89,9 @@ class AuthRepository {
 
   Future<AppUser?> getUserById(String userId) async {
     if (Platform.isWindows) {
-      final doc = await _firestoreService.windowsRest!.getDocument('users/$userId');
+      final doc = await _firestoreService.windowsStream!.getDocument(
+        'users/$userId',
+      );
       if (doc == null) {
         return null;
       }
@@ -102,38 +107,23 @@ class AuthRepository {
 
   Stream<List<AppUser>> watchClients() {
     if (Platform.isWindows) {
-      return Stream.multi((controller) {
-        Timer? timer;
-        var active = true;
-
-        Future<void> emit() async {
-          try {
-            final docs = await _firestoreService.windowsRest!.listDocuments('users');
-            final users = docs
-                .map((doc) => AppUser.fromMap(doc.id, doc.data))
-                .where((user) => user.role == UserRole.client)
-                .toList()
-              ..sort((a, b) => a.name.compareTo(b.name));
-            if (active) {
-              controller.add(users);
-            }
-          } catch (error, stackTrace) {
-            if (active) {
-              controller.addError(error, stackTrace);
-            }
-          }
-        }
-
-        unawaited(emit());
-        timer = Timer.periodic(
-          const Duration(seconds: 2),
-          (_) => unawaited(emit()),
-        );
-        controller.onCancel = () {
-          active = false;
-          timer?.cancel();
-        };
-      });
+      return _firestoreService.windowsStream!
+          .watchCollectionWhereEqual(
+            'users',
+            fieldPath: 'role',
+            isEqualTo: UserRole.client.value,
+          )
+          .map(
+            (docs) {
+              final usersById = <String, AppUser>{};
+              for (final doc in docs) {
+                usersById[doc.id] = AppUser.fromMap(doc.id, doc.data);
+              }
+              final users = usersById.values.toList()
+                ..sort((a, b) => a.name.compareTo(b.name));
+              return users;
+            },
+          );
     }
 
     return _firestoreService.users
@@ -150,7 +140,12 @@ class AuthRepository {
 
   Future<bool> hasAnyAdmin() async {
     if (Platform.isWindows) {
-      final docs = await _firestoreService.windowsRest!.listDocuments('users');
+      final docs = await _firestoreService.windowsStream!.queryDocuments(
+        'users',
+        whereField: 'role',
+        isEqualTo: UserRole.admin.value,
+        limit: 1,
+      );
       return docs.any((doc) => doc.data['role'] == UserRole.admin.value);
     }
 
@@ -174,7 +169,7 @@ class AuthRepository {
     }
 
     if (Platform.isWindows) {
-      final created = await _firestoreService.windowsRest!.createDocument(
+      final created = await _firestoreService.windowsStream!.createDocument(
         'users',
         {
           'name': name.trim(),
@@ -210,7 +205,7 @@ class AuthRepository {
       password: password,
     );
     if (Platform.isWindows) {
-      await _firestoreService.windowsRest!
+      await _firestoreService.windowsStream!
           .updateDocument('users/${user.id}', updated.toMap());
       return updated;
     }
@@ -224,7 +219,7 @@ class AuthRepository {
   }) async {
     final updated = user.copyWith(password: password);
     if (Platform.isWindows) {
-      await _firestoreService.windowsRest!.updateDocument('users/${user.id}', {
+      await _firestoreService.windowsStream!.updateDocument('users/${user.id}', {
         'password': password,
       });
       return updated;
@@ -252,7 +247,7 @@ class AuthRepository {
 
   Future<void> deleteUser(String userId) async {
     if (Platform.isWindows) {
-      await _firestoreService.windowsRest!.deleteDocument('users/$userId');
+      await _firestoreService.windowsStream!.deleteDocument('users/$userId');
       return;
     }
     await _firestoreService.users.doc(userId).delete();

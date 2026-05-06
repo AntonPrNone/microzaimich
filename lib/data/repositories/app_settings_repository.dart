@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'dart:async';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -21,22 +22,42 @@ class AppSettingsRepository {
   bool _clockSettingsLoaded = false;
 
   Stream<PaymentSettings> watchPaymentSettings() {
+    if (Platform.isWindows) {
+      return _firestoreService.windowsStream!
+          .watchDocument('app_settings/payment')
+          .map((doc) => PaymentSettings.fromMap(doc?.data));
+    }
     return _firestoreService.appSettings.doc('payment').snapshots().map(
           (snapshot) => PaymentSettings.fromMap(snapshot.data()),
         );
   }
 
   Future<void> savePaymentSettings(PaymentSettings settings) async {
+    if (Platform.isWindows) {
+      await _firestoreService.windowsStream!
+          .setDocument('app_settings/payment', settings.toMap());
+      return;
+    }
     await _firestoreService.appSettings.doc('payment').set(settings.toMap());
   }
 
   Stream<LoanDefaultsSettings> watchLoanDefaults() {
+    if (Platform.isWindows) {
+      return _firestoreService.windowsStream!
+          .watchDocument('app_settings/loan_defaults')
+          .map((doc) => LoanDefaultsSettings.fromMap(doc?.data));
+    }
     return _firestoreService.appSettings.doc('loan_defaults').snapshots().map(
           (snapshot) => LoanDefaultsSettings.fromMap(snapshot.data()),
         );
   }
 
   Future<void> saveLoanDefaults(LoanDefaultsSettings settings) async {
+    if (Platform.isWindows) {
+      await _firestoreService.windowsStream!
+          .setDocument('app_settings/loan_defaults', settings.toMap());
+      return;
+    }
     await _firestoreService.appSettings
         .doc('loan_defaults')
         .set(settings.toMap());

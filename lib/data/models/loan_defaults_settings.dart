@@ -53,9 +53,20 @@ class LoanDefaultsSettings {
       paymentCount: (map['paymentCount'] as num?)?.toInt() ?? 6,
       paymentIntervalCount: (map['paymentIntervalCount'] as num?)?.toInt() ?? 1,
       paymentIntervalUnit: map['paymentIntervalUnit'] as String? ?? 'months',
-      updatedAt: (map['updatedAt'] as Timestamp?)?.toDate() == null
-          ? null
-          : AppClock.toMoscow((map['updatedAt'] as Timestamp).toDate()),
+      updatedAt: _readDateTime(map['updatedAt']),
     );
+  }
+
+  static DateTime? _readDateTime(dynamic value) {
+    if (value is Timestamp) {
+      return AppClock.toMoscow(value.toDate());
+    }
+    if (value is DateTime) {
+      return AppClock.toMoscow(value);
+    }
+    if (value is String && value.isNotEmpty) {
+      return AppClock.toMoscow(DateTime.parse(value));
+    }
+    return null;
   }
 }

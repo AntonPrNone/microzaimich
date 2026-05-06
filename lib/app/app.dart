@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
@@ -126,7 +128,12 @@ class _AppBootstrapState extends State<AppBootstrap> {
 
   Future<void> _initializeApp() async {
     await AppClock.syncServerTime(_firestoreService);
-    await _loginController.initialize();
+    await _loginController.initialize().timeout(
+      const Duration(seconds: 20),
+      onTimeout: () => throw TimeoutException(
+        'Старт приложения занял слишком много времени.',
+      ),
+    );
   }
 
   @override

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -11,13 +12,21 @@ class BackupService {
   final FirestoreService _firestoreService;
 
   Future<String> exportBackupJson() async {
-    final users = await _readCollection(_firestoreService.users);
-    final loans = await _readCollection(_firestoreService.loans);
-    final notifications = await _readCollection(_firestoreService.notifications);
-    final appSettings = await _readCollection(
-      _firestoreService.appSettings,
-      excludeIds: const {'clock'},
-    );
+    final users = Platform.isWindows
+        ? await _readWindowsCollection('users')
+        : await _readCollection(_firestoreService.users);
+    final loans = Platform.isWindows
+        ? await _readWindowsCollection('loans')
+        : await _readCollection(_firestoreService.loans);
+    final notifications = Platform.isWindows
+        ? await _readWindowsCollection('notifications')
+        : await _readCollection(_firestoreService.notifications);
+    final appSettings = Platform.isWindows
+        ? await _readWindowsCollection('app_settings', excludeIds: const {'clock'})
+        : await _readCollection(
+            _firestoreService.appSettings,
+            excludeIds: const {'clock'},
+          );
 
     final payload = <String, dynamic>{
       'meta': {
@@ -47,27 +56,43 @@ class BackupService {
       throw const BackupException('В файле нет данных коллекций');
     }
 
-    await _replaceCollection(
-      _firestoreService.users,
-      _parseDocuments(collections['users']),
-    );
-    await _replaceCollection(
-      _firestoreService.loans,
-      _parseDocuments(collections['loans']),
-    );
-    await _replaceCollection(
-      _firestoreService.notifications,
-      _parseDocuments(collections['notifications']),
-    );
-    await _replaceCollection(
-      _firestoreService.appSettings,
-      _parseDocuments(collections['app_settings'])
-          .where((document) => document.id != 'clock')
-          .toList(),
-    );
+    final users = _parseDocuments(collections['users']);
+    final loans = _parseDocuments(collections['loans']);
+    final notifications = _parseDocuments(collections['notifications']);
+    final appSettings = _parseDocuments(collections['app_settings'])
+        .where((document) => document.id != 'clock')
+        .toList();
+
+    if (Platform.isWindows) {
+      await _replaceWindowsCollection('users', users);
+      await _replaceWindowsCollection('loans', loans);
+      await _replaceWindowsCollection('notifications', notifications);
+      await _replaceWindowsCollection('app_settings', appSettings);
+      return;
+    }
+
+    await _replaceCollection(_firestoreService.users, users);
+    await _replaceCollection(_firestoreService.loans, loans);
+    await _replaceCollection(_firestoreService.notifications, notifications);
+    await _replaceCollection(_firestoreService.appSettings, appSettings);
   }
 
   Future<void> clearAllPreservingAdmin(String adminUserId) async {
+    if (Platform.isWindows) {
+      await _clearWindowsCollection('loans');
+      await _clearWindowsCollection('notifications');
+      await _clearWindowsCollection('app_settings');
+
+      final users = await _firestoreService.windowsStream!.listDocuments('users');
+      for (final doc in users) {
+        if (doc.id == adminUserId) {
+          continue;
+        }
+        await _firestoreService.windowsStream!.deleteDocument('users/${doc.id}');
+      }
+      return;
+    }
+
     await _clearCollection(_firestoreService.loans);
     await _clearCollection(_firestoreService.notifications);
     await _clearCollection(_firestoreService.appSettings);
@@ -105,6 +130,23 @@ class BackupService {
           (doc) => <String, dynamic>{
             'id': doc.id,
             'data': _encodeValue(doc.data()),
+          },
+        )
+        .toList();
+  }
+
+  Future<List<Map<String, dynamic>>> _readWindowsCollection(
+    String collectionPath, {
+    Set<String>? excludeIds,
+  }) async {
+    final excluded = excludeIds ?? const <String>{};
+    final docs = await _firestoreService.windowsStream!.listDocuments(collectionPath);
+    return docs
+        .where((doc) => !excluded.contains(doc.id))
+        .map(
+          (doc) => <String, dynamic>{
+            'id': doc.id,
+            'data': _encodeValue(doc.data),
           },
         )
         .toList();
@@ -159,6 +201,19 @@ class BackupService {
     }
   }
 
+  Future<void> _replaceWindowsCollection(
+    String collectionPath,
+    List<_BackupDocument> documents,
+  ) async {
+    await _clearWindowsCollection(collectionPath);
+    for (final document in documents) {
+      await _firestoreService.windowsStream!.setDocument(
+        '$collectionPath/${document.id}',
+        document.data,
+      );
+    }
+  }
+
   Future<void> _clearCollection(
     CollectionReference<Map<String, dynamic>> collection,
   ) async {
@@ -175,6 +230,13 @@ class BackupService {
         batch.delete(doc.reference);
       }
       await batch.commit();
+    }
+  }
+
+  Future<void> _clearWindowsCollection(String collectionPath) async {
+    final docs = await _firestoreService.windowsStream!.listDocuments(collectionPath);
+    for (final doc in docs) {
+      await _firestoreService.windowsStream!.deleteDocument('$collectionPath/${doc.id}');
     }
   }
 
