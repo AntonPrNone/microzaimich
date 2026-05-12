@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/utils/app_snackbar.dart';
 import '../../../core/utils/input_formatters.dart';
 import '../../../core/utils/validators.dart';
 import '../../../data/repositories/auth_repository.dart';
@@ -131,11 +132,7 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Вход выполнен успешно'),
-      ),
-    );
+    showAppSnackBar('Вход выполнен успешно');
   }
 
   @override

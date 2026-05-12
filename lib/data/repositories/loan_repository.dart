@@ -1,6 +1,5 @@
-import 'dart:io' show Platform;
-
 import '../../core/utils/formatters.dart';
+import '../../core/utils/platform_utils.dart';
 import '../models/app_notification.dart';
 import '../models/loan.dart';
 import '../models/payment_schedule_item.dart';
@@ -21,7 +20,10 @@ class LoanRepository {
   List<Loan> _mapAndSortLoans(Iterable<dynamic> docs) {
     final loansById = <String, Loan>{};
     for (final doc in docs) {
-      loansById[doc.id as String] = Loan.fromMap(doc.id as String, doc.data as Map<String, dynamic>);
+      loansById[doc.id as String] = Loan.fromMap(
+        doc.id as String,
+        doc.data as Map<String, dynamic>,
+      );
     }
     final loans = loansById.values.toList()
       ..sort((a, b) => b.issuedAt.compareTo(a.issuedAt));
@@ -63,7 +65,7 @@ class LoanRepository {
   }
 
   Stream<List<Loan>> watchLoansForUser(String userId) {
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       return _firestoreService.windowsStream!
           .watchCollectionWhereEqual(
             'loans',
@@ -78,14 +80,13 @@ class LoanRepository {
         .where('userId', isEqualTo: userId)
         .snapshots()
         .map(
-          (snapshot) =>
-              snapshot.docs.map(Loan.fromDoc).toList()
-                ..sort((a, b) => b.issuedAt.compareTo(a.issuedAt)),
+          (snapshot) => snapshot.docs.map(Loan.fromDoc).toList()
+            ..sort((a, b) => b.issuedAt.compareTo(a.issuedAt)),
         );
   }
 
   Stream<List<Loan>> watchAllLoans() {
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       return _firestoreService.windowsStream!
           .watchCollection('loans')
           .map(_mapAndSortLoans)
@@ -93,9 +94,8 @@ class LoanRepository {
     }
 
     return _firestoreService.loans.snapshots().map(
-      (snapshot) =>
-          snapshot.docs.map(Loan.fromDoc).toList()
-            ..sort((a, b) => b.issuedAt.compareTo(a.issuedAt)),
+      (snapshot) => snapshot.docs.map(Loan.fromDoc).toList()
+        ..sort((a, b) => b.issuedAt.compareTo(a.issuedAt)),
     );
   }
 
@@ -112,27 +112,30 @@ class LoanRepository {
     String paymentIntervalUnit = '',
     String? note,
   }) async {
-    if (Platform.isWindows) {
-      final created = await _firestoreService.windowsStream!.createDocument('loans', {
-        'userId': userId,
-        'title': title,
-        'principal': principal,
-        'interestPercent': interestPercent,
-        'totalAmount': totalAmount,
-        'dailyPenaltyAmount': dailyPenaltyAmount,
-        'issuedAt': issuedAt,
-        'status': 'active',
-        'paymentIntervalCount': paymentIntervalCount,
-        'paymentIntervalUnit': paymentIntervalUnit,
-        'note': note,
-        'schedule': schedule.map((item) => item.toMap()).toList(),
-      });
+    if (AppPlatform.isWindows) {
+      final created = await _firestoreService.windowsStream!.createDocument(
+        'loans',
+        {
+          'userId': userId,
+          'title': title,
+          'principal': principal,
+          'interestPercent': interestPercent,
+          'totalAmount': totalAmount,
+          'dailyPenaltyAmount': dailyPenaltyAmount,
+          'issuedAt': issuedAt,
+          'status': 'active',
+          'paymentIntervalCount': paymentIntervalCount,
+          'paymentIntervalUnit': paymentIntervalUnit,
+          'note': note,
+          'schedule': schedule.map((item) => item.toMap()).toList(),
+        },
+      );
       final loan = Loan.fromMap(created.id, created.data);
       await _notificationRepository.notifyUser(
         userId: userId,
-        title: 'РќР°Р·РЅР°С‡РµРЅ РЅРѕРІС‹Р№ Р·Р°Р№Рј',
+        title: 'Назначен новый займ',
         body:
-            'Р’Р°Рј РЅР°Р·РЅР°С‡РµРЅ ${loan.displayTitle} РЅР° СЃСѓРјРјСѓ ${Formatters.money(totalAmount)}',
+            'Вам назначен ${loan.displayTitle} на сумму ${Formatters.money(totalAmount)}',
         type: AppNotificationType.loanAssigned,
       );
       return loan;
@@ -184,9 +187,7 @@ class LoanRepository {
   Future<void> closeLoan(Loan loan, {DateTime? paidAt}) async {
     final settlementDate = paidAt ?? AppClock.now();
     final settlementStorageDate = AppClock.fromMoscowWallClock(settlementDate);
-    final unpaidItems = loan.orderedSchedule
-        .where((item) => !item.isPaid)
-        .toList();
+    final unpaidItems = loan.orderedSchedule.where((item) => !item.isPaid).toList();
     if (unpaidItems.isEmpty) {
       return;
     }
@@ -199,17 +200,22 @@ class LoanRepository {
       return item.copyWith(
         isPaid: true,
         paidAt: settlementStorageDate,
-        penaltyAccrued: isSettlementItem ? loan.penaltyForItem(item, at: settlementDate) : 0,
-        interestAccruedPaid: isSettlementItem ? loan.interestOutstandingAt(settlementDate) : 0,
+        penaltyAccrued: isSettlementItem
+            ? loan.penaltyForItem(item, at: settlementDate)
+            : 0,
+        interestAccruedPaid: isSettlementItem
+            ? loan.interestOutstandingAt(settlementDate)
+            : 0,
       );
     }).toList();
     await _updateLoan(loan, updatedSchedule);
   }
 
   Future<void> updateLoan(Loan loan) async {
-    if (Platform.isWindows) {
-      final previousSnapshot = await _firestoreService.windowsStream!
-          .getDocument('loans/${loan.id}');
+    if (AppPlatform.isWindows) {
+      final previousSnapshot = await _firestoreService.windowsStream!.getDocument(
+        'loans/${loan.id}',
+      );
       final previousLoan = previousSnapshot == null
           ? null
           : Loan.fromMap(previousSnapshot.id, previousSnapshot.data);
@@ -239,9 +245,9 @@ class LoanRepository {
       if (isClosed && previousLoan.status != 'closed') {
         await _notificationRepository.notifyUser(
           userId: loan.userId,
-          title: 'Р—Р°Р№Рј Р·Р°РєСЂС‹С‚',
+          title: 'Займ закрыт',
           body:
-              'РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ РѕС‚РјРµС‚РёР» РїРѕР»РЅРѕРµ РїРѕРіР°С€РµРЅРёРµ РїРѕ Р·Р°Р№РјСѓ ${loan.displayTitle}.',
+              'Администратор отметил полное погашение по займу ${loan.displayTitle}.',
           type: AppNotificationType.paymentApproved,
         );
         return;
@@ -250,10 +256,10 @@ class LoanRepository {
       final paymentDate = newlyPaidItems.last.paidAt;
       await _notificationRepository.notifyUser(
         userId: loan.userId,
-        title: 'РџР»Р°С‚С‘Р¶ РѕС‚РјРµС‡РµРЅ РєР°Рє РѕРїР»Р°С‡РµРЅРЅС‹Р№',
+        title: 'Платёж отмечен как оплаченный',
         body:
-            'РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ РѕС‚РјРµС‚РёР» РѕРїР»Р°С‚Сѓ РїРѕ Р·Р°Р№РјСѓ ${loan.displayTitle}'
-            '${paymentDate == null ? '' : ' РѕС‚ ${Formatters.date(paymentDate)}'}.',
+            'Администратор отметил оплату по займу ${loan.displayTitle}'
+            '${paymentDate == null ? '' : ' от ${Formatters.date(paymentDate)}'}.',
         type: AppNotificationType.paymentApproved,
       );
       return;
@@ -307,7 +313,7 @@ class LoanRepository {
   }
 
   Future<void> deleteLoansForUser(String userId) async {
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       final docs = await _firestoreService.windowsStream!.queryDocuments(
         'loans',
         whereField: 'userId',
@@ -319,26 +325,22 @@ class LoanRepository {
       return;
     }
 
-    final snapshot =
-        await _firestoreService.loans.where('userId', isEqualTo: userId).get();
+    final snapshot = await _firestoreService.loans.where('userId', isEqualTo: userId).get();
     for (final doc in snapshot.docs) {
       await doc.reference.delete();
     }
   }
 
   Future<void> deleteLoan(String loanId) async {
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       await _firestoreService.windowsStream!.deleteDocument('loans/$loanId');
       return;
     }
     await _firestoreService.loans.doc(loanId).delete();
   }
 
-  Future<void> _updateLoan(
-    Loan loan,
-    List<PaymentScheduleItem> schedule,
-  ) async {
-    if (Platform.isWindows) {
+  Future<void> _updateLoan(Loan loan, List<PaymentScheduleItem> schedule) async {
+    if (AppPlatform.isWindows) {
       final isClosed = schedule.every((item) => item.isPaid);
       await _firestoreService.windowsStream!.updateDocument('loans/${loan.id}', {
         'schedule': schedule.map((item) => item.toMap()).toList(),

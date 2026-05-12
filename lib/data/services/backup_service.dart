@@ -1,8 +1,8 @@
 import 'dart:convert';
-import 'dart:io' show Platform;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../core/utils/platform_utils.dart';
 import 'firestore_service.dart';
 
 class BackupService {
@@ -12,16 +12,16 @@ class BackupService {
   final FirestoreService _firestoreService;
 
   Future<String> exportBackupJson() async {
-    final users = Platform.isWindows
+    final users = AppPlatform.isWindows
         ? await _readWindowsCollection('users')
         : await _readCollection(_firestoreService.users);
-    final loans = Platform.isWindows
+    final loans = AppPlatform.isWindows
         ? await _readWindowsCollection('loans')
         : await _readCollection(_firestoreService.loans);
-    final notifications = Platform.isWindows
+    final notifications = AppPlatform.isWindows
         ? await _readWindowsCollection('notifications')
         : await _readCollection(_firestoreService.notifications);
-    final appSettings = Platform.isWindows
+    final appSettings = AppPlatform.isWindows
         ? await _readWindowsCollection('app_settings', excludeIds: const {'clock'})
         : await _readCollection(
             _firestoreService.appSettings,
@@ -63,7 +63,7 @@ class BackupService {
         .where((document) => document.id != 'clock')
         .toList();
 
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       await _replaceWindowsCollection('users', users);
       await _replaceWindowsCollection('loans', loans);
       await _replaceWindowsCollection('notifications', notifications);
@@ -78,7 +78,7 @@ class BackupService {
   }
 
   Future<void> clearAllPreservingAdmin(String adminUserId) async {
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       await _clearWindowsCollection('loans');
       await _clearWindowsCollection('notifications');
       await _clearWindowsCollection('app_settings');

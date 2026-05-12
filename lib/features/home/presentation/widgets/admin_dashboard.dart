@@ -1,7 +1,6 @@
 ﻿import 'dart:async';
 
 import 'dart:math' as math;
-import 'dart:io' show Platform;
 
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:flutter/material.dart';
@@ -11,6 +10,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../core/utils/formatters.dart';
 import '../../../../core/utils/input_formatters.dart';
+import '../../../../core/utils/app_snackbar.dart';
+import '../../../../core/utils/platform_utils.dart';
 import '../../../../core/utils/validators.dart';
 import '../../../../core/widgets/ad_navigation_shortcuts.dart';
 import '../../../../data/models/app_user.dart';
@@ -21,9 +22,9 @@ import '../../../../data/models/payment_settings.dart';
 import '../../../../data/services/app_clock.dart';
 
 final Duration _desktopAwareUiDuration =
-    Platform.isWindows ? const Duration(milliseconds: 1) : const Duration(milliseconds: 220);
+    AppPlatform.isWindows ? const Duration(milliseconds: 1) : const Duration(milliseconds: 220);
 final Duration _desktopAwareFastDuration =
-    Platform.isWindows ? const Duration(milliseconds: 1) : const Duration(milliseconds: 180);
+    AppPlatform.isWindows ? const Duration(milliseconds: 1) : const Duration(milliseconds: 180);
 
 enum _ClientQuickFilter {
   overdue('С просрочкой', Icons.warning_amber_rounded, Color(0xFFFFC26B)),
@@ -814,7 +815,7 @@ class _AdminClientCard extends StatelessWidget {
               child: AnimatedOpacity(
                 duration: _desktopAwareFastDuration,
                 opacity: isDragReady ? 1 : 0,
-                child: Platform.isWindows
+                child: AppPlatform.isWindows
                     ? Container(
                         margin: const EdgeInsets.all(2),
                         decoration: BoxDecoration(
@@ -1091,34 +1092,18 @@ class _ProfitBreakdownSheetState extends State<_ProfitBreakdownSheet> {
 
 class _ClientLoansSheetState extends State<_ClientLoansSheet> {
   late final PageController _pageController;
-  StreamSubscription<List<Loan>>? _loanSubscription;
   int _currentPage = 0;
   int? _loanPagesSignature;
   List<Widget> _cachedLoanPages = const [];
-  late List<Loan> _loans;
 
   @override
   void initState() {
     super.initState();
     _pageController = PageController();
-    _loans = _sortLoans(widget.initialLoans);
-    _loanSubscription = widget.loanStream.listen((loans) {
-      if (!mounted) {
-        return;
-      }
-      final sortedLoans = _sortLoans(loans);
-      if (_sameSheetLoans(_loans, sortedLoans)) {
-        return;
-      }
-      setState(() {
-        _loans = sortedLoans;
-      });
-    });
   }
 
   @override
   void dispose() {
-    _loanSubscription?.cancel();
     _pageController.dispose();
     super.dispose();
   }
@@ -1134,30 +1119,6 @@ class _ClientLoansSheetState extends State<_ClientLoansSheet> {
         return a.issuedAt.compareTo(b.issuedAt);
       });
     return sorted;
-  }
-
-  bool _sameSheetLoans(List<Loan> previous, List<Loan> next) {
-    if (identical(previous, next)) {
-      return true;
-    }
-    if (previous.length != next.length) {
-      return false;
-    }
-    for (var index = 0; index < previous.length; index++) {
-      final left = previous[index];
-      final right = next[index];
-      if (left.id != right.id ||
-          left.status != right.status ||
-          left.plannedOutstandingAmount != right.plannedOutstandingAmount ||
-          left.fullCloseAmount != right.fullCloseAmount ||
-          left.paidAmount != right.paidAmount ||
-          left.penaltyOutstanding != right.penaltyOutstanding ||
-          left.penaltyPaid != right.penaltyPaid ||
-          left.schedule.length != right.schedule.length) {
-        return false;
-      }
-    }
-    return true;
   }
 
   Future<void> _goToPage(int page) async {
@@ -1261,9 +1222,7 @@ class _ClientLoansSheetState extends State<_ClientLoansSheet> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('Займ "${loan.displayTitle}" удалён')));
+    showAppSnackBar('Займ "${loan.displayTitle}" удалён');
   }
 
   Future<void> _confirmCloseLoan(Loan loan) async {
@@ -1287,14 +1246,8 @@ class _ClientLoansSheetState extends State<_ClientLoansSheet> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Займ "${loan.displayTitle}" погашен полностью от ${Formatters.date(pickedDate)}',
-        ),
-      ),
+    showAppSnackBar(
+      'Займ "${loan.displayTitle}" погашен полностью от ${Formatters.date(pickedDate)}',
     );
   }
 
@@ -1324,21 +1277,25 @@ class _ClientLoansSheetState extends State<_ClientLoansSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final loans = _loans;
-    if (loans.isEmpty) {
-      _currentPage = 0;
-    } else if (_currentPage >= loans.length) {
-      _currentPage = loans.length - 1;
-    }
-    final currentLoan = loans.isEmpty ? null : loans[_currentPage.clamp(0, loans.length - 1)];
-    final loanPages = _loanPagesFor(loans);
+    return StreamBuilder<List<Loan>>(
+      stream: widget.loanStream,
+      initialData: widget.initialLoans,
+      builder: (context, snapshot) {
+        final loans = _sortLoans(snapshot.data ?? widget.initialLoans);
+        if (loans.isEmpty) {
+          _currentPage = 0;
+        } else if (_currentPage >= loans.length) {
+          _currentPage = loans.length - 1;
+        }
+        final currentLoan = loans.isEmpty ? null : loans[_currentPage.clamp(0, loans.length - 1)];
+        final loanPages = _loanPagesFor(loans);
 
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
@@ -1484,9 +1441,11 @@ class _ClientLoansSheetState extends State<_ClientLoansSheet> {
                 ),
               ),
             ],
-          ],
-        ),
-      ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -1606,9 +1565,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Нет клиентов для удаления')));
+      showAppSnackBar('Нет клиентов для удаления');
       return;
     }
 
@@ -1728,9 +1685,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('Удалено клиентов: ${confirmedClients.length}')));
+    showAppSnackBar('Удалено клиентов: ${confirmedClients.length}');
   }
 
   @override
@@ -1779,19 +1734,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Реквизиты оплаты сохранены')));
+    showAppSnackBar('Реквизиты оплаты сохранены');
   }
 
   Future<void> _pickClientFromContacts() async {
-    if (!Platform.isAndroid && !Platform.isIOS) {
+    if (!AppPlatform.isAndroid && !AppPlatform.isIOS) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Импорт контактов доступен только на телефоне'),
-        ),
-      );
+      showAppSnackBar('Импорт контактов доступен только на телефоне');
       return;
     }
 
@@ -1801,11 +1750,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       );
       if (!hasPermission) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Нужен доступ к контактам, чтобы импортировать клиента'),
-          ),
-        );
+        showAppSnackBar('Нужен доступ к контактам, чтобы импортировать клиента');
         return;
       }
 
@@ -1842,9 +1787,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       if (nameError != null || phoneError != null) {
         if (!mounted) return;
 
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(nameError ?? phoneError!)));
+        showAppSnackBar(nameError ?? phoneError!);
         return;
       }
 
@@ -1862,17 +1805,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
       if (!mounted) return;
 
       final message = (e.message ?? '').toLowerCase();
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(
-        SnackBar(
-          content: Text(
-            e.code.toLowerCase().contains('permission') ||
-                    message.contains('permission')
-                ? 'Нужен доступ к контактам, чтобы импортировать клиента'
-                : 'Не удалось открыть контакты',
-          ),
-        ),
+      showAppSnackBar(
+        e.code.toLowerCase().contains('permission') ||
+                message.contains('permission')
+            ? 'Нужен доступ к контактам, чтобы импортировать клиента'
+            : 'Не удалось открыть контакты',
       );
     } catch (e, st) {
       debugPrint('Ошибка выбора контакта: $e');
@@ -1880,9 +1817,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Не удалось выбрать контакт')));
+      showAppSnackBar('Не удалось выбрать контакт');
     }
   }
 
@@ -2230,11 +2165,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 const SizedBox(height: 16),
                 ElevatedButton.icon(
                   onPressed: () async {
-                    final messenger = ScaffoldMessenger.of(context);
                     final nameError = Validators.name(_clientNameController.text);
                     final phoneError = Validators.phone(_clientPhoneController.text);
                     if (nameError != null || phoneError != null) {
-                      messenger.showSnackBar(SnackBar(content: Text(nameError ?? phoneError!)));
+                    showAppSnackBar(nameError ?? phoneError!);
                       return;
                     }
                     await widget.onCreateClient(
@@ -2246,10 +2180,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     }
                     _clientNameController.clear();
                     _clientPhoneController.clear();
-                    messenger.showSnackBar(
-                      const SnackBar(
-                        content: Text('Клиент создан, пароль он задаст при первом входе'),
-                      ),
+                    showAppSnackBar(
+                      'Клиент создан, пароль он задаст при первом входе',
                     );
                   },
                   icon: const Icon(Icons.person_add_outlined),
@@ -2518,7 +2450,7 @@ class _LoanPreviewCard extends StatelessWidget {
       ),
     );
 
-    if (!Platform.isWindows) {
+    if (!AppPlatform.isWindows) {
       return card;
     }
 
@@ -3181,20 +3113,19 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
   }
 
   Future<void> _save() async {
-    final messenger = ScaffoldMessenger.of(context);
     if (_selectedClientId == null) {
-      messenger.showSnackBar(const SnackBar(content: Text('Выберите клиента')));
+      showAppSnackBar('Выберите клиента');
       return;
     }
 
     final principal = Formatters.parseDecimal(_principalController.text);
     final dailyPenalty = Formatters.parseDecimal(_dailyPenaltyController.text);
     if (principal <= 0) {
-      messenger.showSnackBar(const SnackBar(content: Text('Сумма займа должна быть больше нуля')));
+      showAppSnackBar('Сумма займа должна быть больше нуля');
       return;
     }
     if (_scheduleRows.isEmpty) {
-      messenger.showSnackBar(const SnackBar(content: Text('Добавьте хотя бы один платёж')));
+      showAppSnackBar('Добавьте хотя бы один платёж');
       return;
     }
     final previewLoan = _buildEditorPreviewLoan();
@@ -3203,9 +3134,7 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
       final previewItem = previewLoan.orderedSchedule.firstWhere((item) => item.id == row.id);
       final amount = previewLoan.principalAmountForItem(previewItem);
       if (amount <= 0) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('Сумма каждого платежа должна быть больше нуля')),
-        );
+        showAppSnackBar('Сумма каждого платежа должна быть больше нуля');
         return;
       }
       schedule.add(
@@ -3959,7 +3888,7 @@ class _FlippableAdminMetric extends StatelessWidget {
 
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(end: rotation),
-      duration: Platform.isWindows ? const Duration(milliseconds: 1) : const Duration(milliseconds: 420),
+      duration: AppPlatform.isWindows ? const Duration(milliseconds: 1) : const Duration(milliseconds: 420),
       curve: Curves.easeInOutCubic,
       builder: (context, angle, child) {
         final showBack = angle >= math.pi / 2;
@@ -4436,7 +4365,7 @@ class _PreviewRow extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: Platform.isWindows
+      child: AppPlatform.isWindows
           ? Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

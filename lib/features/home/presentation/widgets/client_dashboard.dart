@@ -1,12 +1,12 @@
 ﻿import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'dart:io' show Platform;
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/utils/app_snackbar.dart';
 import '../../../../core/utils/formatters.dart';
+import '../../../../core/utils/platform_utils.dart';
 import '../../../../data/models/app_user.dart';
 import '../../../../data/models/loan.dart';
 import '../../../../data/models/payment_schedule_item.dart';
@@ -14,9 +14,9 @@ import '../../../../data/models/payment_settings.dart';
 import '../../../../data/services/app_clock.dart';
 
 final Duration _desktopAwareUiDuration =
-    Platform.isWindows ? const Duration(milliseconds: 1) : const Duration(milliseconds: 220);
+    AppPlatform.isWindows ? const Duration(milliseconds: 1) : const Duration(milliseconds: 220);
 final Duration _desktopAwareFastDuration =
-    Platform.isWindows ? const Duration(milliseconds: 1) : const Duration(milliseconds: 180);
+    AppPlatform.isWindows ? const Duration(milliseconds: 1) : const Duration(milliseconds: 180);
 
 class ClientDashboard extends StatefulWidget {
   const ClientDashboard({
@@ -1229,7 +1229,7 @@ class _LoanCard extends StatelessWidget {
               child: AnimatedOpacity(
                 duration: _desktopAwareFastDuration,
                 opacity: isDragReady ? 1 : 0,
-                child: Platform.isWindows
+                child: AppPlatform.isWindows
                     ? Container(
                         margin: const EdgeInsets.all(2),
                         decoration: BoxDecoration(

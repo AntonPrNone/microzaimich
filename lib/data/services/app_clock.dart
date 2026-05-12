@@ -1,8 +1,8 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../core/utils/platform_utils.dart';
 import '../models/app_clock_settings.dart';
 import 'firestore_service.dart';
 
@@ -57,7 +57,7 @@ class AppClock {
   static DateTime nowForStorage() => fromMoscowWallClock(now());
 
   static Future<void> syncServerTime(FirestoreService firestore) async {
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       _serverOffset = Duration.zero;
       return;
     }

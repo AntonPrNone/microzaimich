@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -11,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/app_snackbar.dart';
+import '../../../core/utils/platform_utils.dart';
 import '../../../core/widgets/ad_navigation_shortcuts.dart';
 import '../../../data/models/app_notification.dart';
 import '../../../data/models/app_clock_settings.dart';
@@ -36,41 +38,54 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final currentUser = context.watch<LoginController>().currentUser!;
+    final sessionUser = context.watch<LoginController>().currentUser!;
     final authRepository = context.read<AuthRepository>();
     final loanRepository = context.read<LoanRepository>();
     final appSettingsRepository = context.read<AppSettingsRepository>();
     final notificationRepository = context.read<NotificationRepository>();
     final backupService = context.read<BackupService>();
 
-    return StreamBuilder<AppClockSettings>(
-      stream: appSettingsRepository.watchClockSettings(),
+    return StreamBuilder<AppUser?>(
+      stream: authRepository.watchUserById(sessionUser.id),
+      initialData: sessionUser,
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
+        final currentUser = snapshot.data;
+        if (currentUser == null) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
         }
 
-        AppClock.applySettings(snapshot.data!);
+        return StreamBuilder<AppClockSettings>(
+          stream: appSettingsRepository.watchClockSettings(),
+          builder: (context, clockSnapshot) {
+            if (!clockSnapshot.hasData) {
+              return const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+              );
+            }
 
-        if (currentUser.role == UserRole.admin) {
-          return _AdminHome(
-            currentUser: currentUser,
-            authRepository: authRepository,
-            loanRepository: loanRepository,
-            appSettingsRepository: appSettingsRepository,
-            notificationRepository: notificationRepository,
-            backupService: backupService,
-            clockSettings: snapshot.data!,
-          );
-        }
+            AppClock.applySettings(clockSnapshot.data!);
 
-        return _ClientHome(
-          currentUser: currentUser,
-          loanRepository: loanRepository,
-          appSettingsRepository: appSettingsRepository,
-          notificationRepository: notificationRepository,
+            if (currentUser.role == UserRole.admin) {
+              return _AdminHome(
+                currentUser: currentUser,
+                authRepository: authRepository,
+                loanRepository: loanRepository,
+                appSettingsRepository: appSettingsRepository,
+                notificationRepository: notificationRepository,
+                backupService: backupService,
+                clockSettings: clockSnapshot.data!,
+              );
+            }
+
+            return _ClientHome(
+              currentUser: currentUser,
+              loanRepository: loanRepository,
+              appSettingsRepository: appSettingsRepository,
+              notificationRepository: notificationRepository,
+            );
+          },
         );
       },
     );
@@ -322,7 +337,7 @@ class _AdminHomeState extends State<_AdminHome> {
   Widget build(BuildContext context) {
     return DefaultTabController(
       length: 2,
-      animationDuration: Platform.isWindows
+      animationDuration: AppPlatform.isWindows
           ? const Duration(milliseconds: 1)
           : kTabScrollDuration,
       child: StreamBuilder<List<AppUser>>(
@@ -454,7 +469,7 @@ class _AdminHomeState extends State<_AdminHome> {
                                     }
                                   },
                                   child: TabBarView(
-                                    physics: Platform.isWindows
+                                    physics: AppPlatform.isWindows
                                         ? const NeverScrollableScrollPhysics()
                                         : null,
                                     children: [
@@ -1116,7 +1131,6 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       return;
     }
 
-    final messenger = ScaffoldMessenger.of(context);
     setState(() {
       _backupInProgress = true;
     });
@@ -1126,7 +1140,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       final now = AppClock.now();
       final suggestedName =
           'microzaimich-backup-${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}-${now.minute.toString().padLeft(2, '0')}.json';
-      if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      if (AppPlatform.isWindows || AppPlatform.isLinux || AppPlatform.isMacOS) {
         final targetPath = await FilePicker.platform.saveFile(
           dialogTitle: 'Сохранить резервную копию',
           fileName: suggestedName,
@@ -1138,6 +1152,20 @@ class _SettingsSheetState extends State<_SettingsSheet> {
         }
         final backupFile = File(targetPath);
         await backupFile.writeAsString(json, flush: true);
+      } else if (AppPlatform.isWeb) {
+        final backupBytes = Uint8List.fromList(utf8.encode(json));
+        await Share.shareXFiles(
+          [
+            XFile.fromData(
+              backupBytes,
+              mimeType: 'application/json',
+              name: suggestedName,
+            ),
+          ],
+          subject: 'Резервная копия Microzaimich',
+          text: 'Резервная копия базы данных приложения',
+          fileNameOverrides: [suggestedName],
+        );
       } else {
         final tempDir = await getTemporaryDirectory();
         final backupFile = File('${tempDir.path}/$suggestedName');
@@ -1153,18 +1181,12 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       if (!mounted) {
         return;
       }
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Файл резервной копии подготовлен для сохранения'),
-        ),
-      );
+      showAppSnackBar('Файл резервной копии подготовлен для сохранения');
     } on Object catch (error) {
       if (!mounted) {
         return;
       }
-      messenger.showSnackBar(
-        SnackBar(content: Text('Не удалось сохранить резервную копию: $error')),
-      );
+      showAppSnackBar('Не удалось сохранить резервную копию: $error');
     } finally {
       if (mounted) {
         setState(() {
@@ -1184,7 +1206,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       builder: (context) => AlertDialog(
         title: const Text('Восстановить базу из файла'),
         content: const Text(
-          'Текущая база будет полностью очищена и заменена данными из резервной копии. Пользователи, займы, заявки, уведомления и настройки будут перезаписаны без возможности отмены.',
+          'Текущая база будет полностью очищена и заменена данными из резервной копии. Пользователи, займы, уведомления и настройки будут перезаписаны без возможности отмены.',
         ),
         actions: [
           TextButton(
@@ -1203,7 +1225,6 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       return;
     }
 
-    final messenger = ScaffoldMessenger.of(context);
     setState(() {
       _backupInProgress = true;
     });
@@ -1220,12 +1241,15 @@ class _SettingsSheetState extends State<_SettingsSheet> {
 
       final pickedFile = result.files.single;
       final bytes = pickedFile.bytes;
-      final path = pickedFile.path;
-      final json = bytes != null
-          ? utf8.decode(bytes)
-          : path != null
-          ? await XFile(path).readAsString()
-          : null;
+      String? json;
+      if (bytes != null) {
+        json = utf8.decode(bytes);
+      } else if (!AppPlatform.isWeb) {
+        final path = pickedFile.path;
+        if (path != null) {
+          json = await XFile(path).readAsString();
+        }
+      }
       if (json == null) {
         throw const BackupException('Не удалось прочитать выбранный файл');
       }
@@ -1234,16 +1258,12 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       if (!mounted) {
         return;
       }
-      messenger.showSnackBar(
-        const SnackBar(content: Text('База данных восстановлена из файла')),
-      );
+      showAppSnackBar('База данных восстановлена из файла');
     } on Object catch (error) {
       if (!mounted) {
         return;
       }
-      messenger.showSnackBar(
-        SnackBar(content: Text('Не удалось восстановить резервную копию: $error')),
-      );
+      showAppSnackBar('Не удалось восстановить резервную копию: $error');
     } finally {
       if (mounted) {
         setState(() {
@@ -1278,13 +1298,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Время напоминания админу: ${picked.format(context)}',
-        ),
-      ),
-    );
+    showAppSnackBar('Время напоминания админу: ${picked.format(context)}');
   }
 
   Future<void> _pickReminderTime({required bool forAdmin}) async {
@@ -1426,7 +1440,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Очистить всю базу'),
         content: const Text(
-          'Будут удалены все клиенты, займы, заявки, уведомления и настройки. '
+          'Будут удалены все клиенты, займы, уведомления и настройки. '
           'Сохранится только текущий профиль администратора. Действие необратимо.',
         ),
         actions: [
@@ -1449,7 +1463,6 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       return;
     }
 
-    final messenger = ScaffoldMessenger.of(context);
     setState(() {
       _backupInProgress = true;
     });
@@ -1459,20 +1472,14 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       if (!mounted) {
         return;
       }
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text(
-            'База очищена. Сохранён только текущий профиль администратора.',
-          ),
-        ),
+      showAppSnackBar(
+        'База очищена. Сохранён только текущий профиль администратора.',
       );
     } on Object catch (error) {
       if (!mounted) {
         return;
       }
-      messenger.showSnackBar(
-        SnackBar(content: Text('Не удалось очистить базу: $error')),
-      );
+      showAppSnackBar('Не удалось очистить базу: $error');
     } finally {
       if (mounted) {
         setState(() {
@@ -1636,7 +1643,6 @@ class _SettingsSheetState extends State<_SettingsSheet> {
               width: double.infinity,
               child: ElevatedButton.icon(
                 onPressed: () async {
-                  final messenger = ScaffoldMessenger.of(context);
                   final paymentCount =
                       int.tryParse(_countController.text.trim()) ?? 0;
                   final intervalCount =
@@ -1662,11 +1668,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   if (!mounted) {
                     return;
                   }
-                  messenger.showSnackBar(
-                    const SnackBar(
-                      content: Text('Значения по умолчанию сохранены'),
-                    ),
-                  );
+                  showAppSnackBar('Значения по умолчанию сохранены');
                 },
                 icon: const Icon(Icons.save_outlined),
                 label: const Text('Сохранить значения по умолчанию'),
@@ -1938,7 +1940,6 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 const SizedBox(height: 16),
                 ElevatedButton.icon(
                   onPressed: () async {
-                    final messenger = ScaffoldMessenger.of(context);
                     final paymentCount =
                         int.tryParse(_countController.text.trim()) ?? 0;
                     final intervalCount =
@@ -1964,11 +1965,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     if (!mounted) {
                       return;
                     }
-                    messenger.showSnackBar(
-                      const SnackBar(
-                        content: Text('Значения по умолчанию сохранены'),
-                      ),
-                    );
+                    showAppSnackBar('Значения по умолчанию сохранены');
                   },
                   icon: const Icon(Icons.save_outlined),
                   label: const Text('Сохранить значения по умолчанию'),

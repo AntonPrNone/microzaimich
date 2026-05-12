@@ -1,5 +1,4 @@
-import 'dart:io' show Platform;
-
+import '../../core/utils/platform_utils.dart';
 import '../models/app_notification.dart';
 import '../services/app_clock.dart';
 import '../models/user_role.dart';
@@ -13,7 +12,7 @@ class NotificationRepository {
   final FirestoreService _firestoreService;
 
   Stream<List<AppNotification>> watchForUser(String userId) {
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       return _firestoreService.windowsStream!
           .watchCollectionWhereEqual(
             'notifications',
@@ -50,7 +49,7 @@ class NotificationRepository {
     required String body,
     required AppNotificationType type,
   }) async {
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       await _firestoreService.windowsStream!.createDocument('notifications', {
         'userId': userId,
         'title': title,
@@ -79,7 +78,7 @@ class NotificationRepository {
     required String body,
     required AppNotificationType type,
   }) async {
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       final admins = await _firestoreService.windowsStream!.queryDocuments(
         'users',
         whereField: 'role',
@@ -112,7 +111,7 @@ class NotificationRepository {
   }
 
   Future<void> markAsRead(String notificationId) async {
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       await _firestoreService.windowsStream!.updateDocument(
         'notifications/$notificationId',
         {
@@ -127,7 +126,7 @@ class NotificationRepository {
   }
 
   Future<void> markAllAsRead(String userId) async {
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       final docs = await _firestoreService.windowsStream!.queryDocuments(
         'notifications',
         whereField: 'userId',
@@ -154,7 +153,7 @@ class NotificationRepository {
   }
 
   Future<void> deleteForUser(String userId) async {
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       final docs = await _firestoreService.windowsStream!.queryDocuments(
         'notifications',
         whereField: 'userId',

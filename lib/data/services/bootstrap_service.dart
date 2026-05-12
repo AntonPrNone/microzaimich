@@ -25,14 +25,14 @@ class BootstrapService {
     }
 
     final admin = await _authRepository.createUser(
-      name: 'Р“Р»Р°РІРЅС‹Р№ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ',
+      name: 'Главный администратор',
       phone: '79990000000',
       password: 'admin123',
       role: UserRole.admin,
     );
 
     final client = await _authRepository.createUser(
-      name: 'РђРЅРЅР° РљР»РёРµРЅС‚',
+      name: 'Анна Клиент',
       phone: '79991112233',
       password: 'client123',
       role: UserRole.client,
@@ -41,13 +41,13 @@ class BootstrapService {
     final issuedAt = AppClock.now();
     await _loanRepository.createLoan(
       userId: client.id,
-      title: 'Р”РµРјРѕ-Р·Р°Р№Рј',
+      title: 'Демо-займ',
       principal: 30000,
       interestPercent: 20,
       totalAmount: 36000,
       dailyPenaltyAmount: 150,
       issuedAt: AppClock.fromMoscowWallClock(issuedAt),
-      note: 'Р”РµРјРѕ-Р·Р°Р№Рј РґР»СЏ РїРµСЂРІРѕРіРѕ Р·Р°РїСѓСЃРєР°.',
+      note: 'Демо-займ для первого запуска.',
       schedule: List.generate(
         6,
         (index) => PaymentScheduleItem(
@@ -59,7 +59,9 @@ class BootstrapService {
           isPaid: index == 0,
           penaltyAccrued: 0,
           paidAt: index == 0
-              ? AppClock.fromMoscowWallClock(issuedAt.subtract(const Duration(days: 1)))
+              ? AppClock.fromMoscowWallClock(
+                  issuedAt.subtract(const Duration(days: 1)),
+                )
               : null,
         ),
       ),

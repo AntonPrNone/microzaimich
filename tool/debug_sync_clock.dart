@@ -1,8 +1,11 @@
-import 'package:microzaimich/data/services/firestore_service.dart';
+import 'dart:io';
+
 import 'package:microzaimich/data/services/app_clock.dart';
+import 'package:microzaimich/data/services/firestore_service.dart';
+
 Future<void> main() async {
-  final fs = FirestoreService();
-  print('before syncServerTime');
-  await AppClock.syncServerTime(fs);
-  print('after syncServerTime');
+  final firestoreService = FirestoreService();
+  stdout.writeln('before syncServerTime');
+  await AppClock.syncServerTime(firestoreService);
+  stdout.writeln('after syncServerTime');
 }

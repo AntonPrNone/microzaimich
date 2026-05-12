@@ -1,5 +1,3 @@
-import 'dart:io' show Platform;
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,6 +7,7 @@ import 'package:timezone/data/latest_all.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../../core/utils/formatters.dart';
+import '../../core/utils/platform_utils.dart';
 import '../models/app_user.dart';
 import '../models/loan.dart';
 
@@ -24,9 +23,9 @@ class LocalNotificationService {
   static bool _timezoneReady = false;
 
   static bool get _supportsAndroidNotifications =>
-      !kIsWeb && Platform.isAndroid;
+      !kIsWeb && AppPlatform.isAndroid;
   static bool get _supportsWindowsNotifications =>
-      !kIsWeb && Platform.isWindows;
+      !kIsWeb && AppPlatform.isWindows;
 
   static Future<void> initialize() async {
     if (kIsWeb) {

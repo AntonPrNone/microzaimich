@@ -1,8 +1,8 @@
-import 'dart:io' show Platform;
 import 'dart:async';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/utils/platform_utils.dart';
 import '../models/app_clock_settings.dart';
 import '../models/loan_defaults_settings.dart';
 import '../models/payment_settings.dart';
@@ -22,7 +22,7 @@ class AppSettingsRepository {
   bool _clockSettingsLoaded = false;
 
   Stream<PaymentSettings> watchPaymentSettings() {
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       return _firestoreService.windowsStream!
           .watchDocument('app_settings/payment')
           .map((doc) => PaymentSettings.fromMap(doc?.data));
@@ -33,7 +33,7 @@ class AppSettingsRepository {
   }
 
   Future<void> savePaymentSettings(PaymentSettings settings) async {
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       await _firestoreService.windowsStream!
           .setDocument('app_settings/payment', settings.toMap());
       return;
@@ -42,7 +42,7 @@ class AppSettingsRepository {
   }
 
   Stream<LoanDefaultsSettings> watchLoanDefaults() {
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       return _firestoreService.windowsStream!
           .watchDocument('app_settings/loan_defaults')
           .map((doc) => LoanDefaultsSettings.fromMap(doc?.data));
@@ -53,7 +53,7 @@ class AppSettingsRepository {
   }
 
   Future<void> saveLoanDefaults(LoanDefaultsSettings settings) async {
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       await _firestoreService.windowsStream!
           .setDocument('app_settings/loan_defaults', settings.toMap());
       return;

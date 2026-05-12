@@ -87,6 +87,7 @@ class MicrozaimichApp extends StatelessWidget {
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
+        navigatorKey: rootNavigatorKey,
         scaffoldMessengerKey: rootScaffoldMessengerKey,
         title: 'Микрозаймич',
         theme: AppTheme.dark(),

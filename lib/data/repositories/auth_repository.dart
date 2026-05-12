@@ -1,8 +1,8 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../core/utils/platform_utils.dart';
 import '../models/app_user.dart';
 import '../models/user_role.dart';
 import '../services/app_clock.dart';
@@ -40,7 +40,7 @@ class AuthRepository {
 
   Future<AuthLookupResult> lookupByPhone(String phone) async {
     final normalizedPhone = normalizePhone(phone);
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       final matches = await _firestoreService.windowsStream!.queryDocuments(
         'users',
         whereField: 'phone',
@@ -55,10 +55,7 @@ class AuthRepository {
         );
       }
       final match = matches.first;
-      final user = AppUser.fromMap(
-        match.id,
-        match.data,
-      );
+      final user = AppUser.fromMap(match.id, match.data);
       return AuthLookupResult(
         user: user,
         exists: true,
@@ -88,7 +85,7 @@ class AuthRepository {
   }
 
   Future<AppUser?> getUserById(String userId) async {
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       final doc = await _firestoreService.windowsStream!.getDocument(
         'users/$userId',
       );
@@ -105,25 +102,43 @@ class AuthRepository {
     return AppUser.fromDoc(doc);
   }
 
+  Stream<AppUser?> watchUserById(String userId) {
+    if (AppPlatform.isWindows) {
+      return _firestoreService.windowsStream!
+          .watchDocument('users/$userId')
+          .map((doc) {
+            if (doc == null) {
+              return null;
+            }
+            return AppUser.fromMap(doc.id, doc.data);
+          });
+    }
+
+    return _firestoreService.users.doc(userId).snapshots().map((doc) {
+      if (!doc.exists) {
+        return null;
+      }
+      return AppUser.fromDoc(doc);
+    });
+  }
+
   Stream<List<AppUser>> watchClients() {
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       return _firestoreService.windowsStream!
           .watchCollectionWhereEqual(
             'users',
             fieldPath: 'role',
             isEqualTo: UserRole.client.value,
           )
-          .map(
-            (docs) {
-              final usersById = <String, AppUser>{};
-              for (final doc in docs) {
-                usersById[doc.id] = AppUser.fromMap(doc.id, doc.data);
-              }
-              final users = usersById.values.toList()
-                ..sort((a, b) => a.name.compareTo(b.name));
-              return users;
-            },
-          );
+          .map((docs) {
+            final usersById = <String, AppUser>{};
+            for (final doc in docs) {
+              usersById[doc.id] = AppUser.fromMap(doc.id, doc.data);
+            }
+            final users = usersById.values.toList()
+              ..sort((a, b) => a.name.compareTo(b.name));
+            return users;
+          });
     }
 
     return _firestoreService.users
@@ -139,7 +154,7 @@ class AuthRepository {
   }
 
   Future<bool> hasAnyAdmin() async {
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       final docs = await _firestoreService.windowsStream!.queryDocuments(
         'users',
         whereField: 'role',
@@ -165,10 +180,12 @@ class AuthRepository {
     final normalizedPhone = normalizePhone(phone);
     final existingUser = await lookupByPhone(normalizedPhone);
     if (existingUser.user != null) {
-      throw const AuthException('РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СЃ С‚Р°РєРёРј РЅРѕРјРµСЂРѕРј СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚');
+      throw const AuthException(
+        'Пользователь с таким номером уже существует',
+      );
     }
 
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       final created = await _firestoreService.windowsStream!.createDocument(
         'users',
         {
@@ -204,9 +221,11 @@ class AuthRepository {
       name: name?.trim().isNotEmpty == true ? name!.trim() : user.name,
       password: password,
     );
-    if (Platform.isWindows) {
-      await _firestoreService.windowsStream!
-          .updateDocument('users/${user.id}', updated.toMap());
+    if (AppPlatform.isWindows) {
+      await _firestoreService.windowsStream!.updateDocument(
+        'users/${user.id}',
+        updated.toMap(),
+      );
       return updated;
     }
     await _firestoreService.users.doc(user.id).update(updated.toMap());
@@ -218,7 +237,7 @@ class AuthRepository {
     required String password,
   }) async {
     final updated = user.copyWith(password: password);
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       await _firestoreService.windowsStream!.updateDocument('users/${user.id}', {
         'password': password,
       });
@@ -235,18 +254,20 @@ class AuthRepository {
     final result = await lookupByPhone(phone);
     final user = result.user;
     if (user == null || !user.hasPassword) {
-      throw const AuthException('РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РЅР°Р№РґРµРЅ РёР»Рё РїР°СЂРѕР»СЊ РµС‰С‘ РЅРµ СЃРѕР·РґР°РЅ');
+      throw const AuthException(
+        'Пользователь не найден или пароль ещё не создан',
+      );
     }
 
     if (user.password != password) {
-      throw const AuthException('РќРµРІРµСЂРЅС‹Р№ РїР°СЂРѕР»СЊ');
+      throw const AuthException('Неверный пароль');
     }
 
     return user;
   }
 
   Future<void> deleteUser(String userId) async {
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       await _firestoreService.windowsStream!.deleteDocument('users/$userId');
       return;
     }
