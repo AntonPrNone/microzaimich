@@ -32,6 +32,14 @@ class LocalNotificationService {
       !kIsWeb && AppPlatform.isWindows;
   static bool get _supportsLocalReminders =>
       _supportsAndroidNotifications || _supportsAppleNotifications;
+  static const DarwinNotificationDetails _darwinForegroundDetails =
+      DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
+        presentBanner: true,
+        presentList: true,
+      );
 
   static Future<void> initialize() async {
     if (kIsWeb) {
@@ -125,10 +133,8 @@ class LocalNotificationService {
               priority: Priority.high,
             )
           : null,
-      iOS:
-          _supportsAppleNotifications ? const DarwinNotificationDetails() : null,
-      macOS:
-          _supportsAppleNotifications ? const DarwinNotificationDetails() : null,
+      iOS: _supportsAppleNotifications ? _darwinForegroundDetails : null,
+      macOS: _supportsAppleNotifications ? _darwinForegroundDetails : null,
       windows: _supportsWindowsNotifications
           ? const WindowsNotificationDetails()
           : null,
@@ -419,10 +425,8 @@ class LocalNotificationService {
               priority: Priority.high,
             )
           : null,
-      iOS:
-          _supportsAppleNotifications ? const DarwinNotificationDetails() : null,
-      macOS:
-          _supportsAppleNotifications ? const DarwinNotificationDetails() : null,
+      iOS: _supportsAppleNotifications ? _darwinForegroundDetails : null,
+      macOS: _supportsAppleNotifications ? _darwinForegroundDetails : null,
     );
 
     try {
