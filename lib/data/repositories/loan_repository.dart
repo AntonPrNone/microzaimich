@@ -208,7 +208,12 @@ class LoanRepository {
             : 0,
       );
     }).toList();
-    await _updateLoan(loan, updatedSchedule);
+    await updateLoan(
+      loan.copyWith(
+        schedule: updatedSchedule,
+        status: 'closed',
+      ),
+    );
   }
 
   Future<void> updateLoan(Loan loan) async {
