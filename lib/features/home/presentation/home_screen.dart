@@ -1522,6 +1522,28 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     }
   }
 
+  Future<void> _sendTestUpdateNotification() async {
+    await LocalNotificationService.showUpdate(
+      title: 'Тестовое уведомление',
+      body: 'Проверка обычного мгновенного уведомления администратору.',
+    );
+    if (!mounted) {
+      return;
+    }
+    showAppSnackBar('Тестовое уведомление отправлено');
+  }
+
+  Future<void> _sendTestAdminReminderNotification() async {
+    await LocalNotificationService.showUpdate(
+      title: 'У клиента сегодня день платежа',
+      body: 'Тест: у клиента сегодня срок платежа 1 000,00 ₽.',
+    );
+    if (!mounted) {
+      return;
+    }
+    showAppSnackBar('Тестовое напоминание админу отправлено');
+  }
+
   List<Widget> _buildCommonSettingsSections(BuildContext context) {
     final reminderTitle = _isAdmin
         ? 'Время уведомлений о платежах клиентов'
@@ -1550,6 +1572,26 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 label: Text('$reminderTitle: ${reminderTime.format(context)}'),
               ),
             ),
+            if (_isAdmin) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _sendTestUpdateNotification,
+                  icon: const Icon(Icons.campaign_outlined),
+                  label: const Text('Тест обычного уведомления'),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _sendTestAdminReminderNotification,
+                  icon: const Icon(Icons.notifications_active_outlined),
+                  label: const Text('Тест напоминания админу'),
+                ),
+              ),
+            ],
           ],
         ),
       ),
