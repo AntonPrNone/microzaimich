@@ -165,7 +165,20 @@ class _ClientHomeState extends State<_ClientHome> {
                       ),
                       IconButton(
                         tooltip: 'Настройки',
-                        onPressed: () => _showSettingsSheet(context, widget.currentUser),
+                        onPressed: () => _showSettingsSheet(
+                          context,
+                          widget.currentUser,
+                          onSaveUserReminderTime: ({
+                            required int hour,
+                            required int minute,
+                          }) async {
+                            await context.read<AuthRepository>().updateReminderTime(
+                              user: widget.currentUser,
+                              hour: hour,
+                              minute: minute,
+                            );
+                          },
+                        ),
                         icon: Icon(
                           Icons.settings_outlined,
                           color: Theme.of(context).colorScheme.secondary,
@@ -192,6 +205,10 @@ class _ClientHomeState extends State<_ClientHome> {
                         user: widget.currentUser,
                         loans: loans,
                         notifications: notifications,
+                        reminderTime: TimeOfDay(
+                          hour: widget.currentUser.reminderHour,
+                          minute: widget.currentUser.reminderMinute,
+                        ),
                       ),
                     ],
                   ),
@@ -564,6 +581,12 @@ class _AdminHomeState extends State<_AdminHome> {
                                           for (final client in clients)
                                             client.id: client.name,
                                         },
+                                        reminderTime: TimeOfDay(
+                                          hour:
+                                              paymentSettings.adminDueReminderHour,
+                                          minute:
+                                              paymentSettings.adminDueReminderMinute,
+                                        ),
                                       ),
                               ],
                             ),
@@ -642,12 +665,14 @@ class _NotificationEffects extends StatefulWidget {
     required this.loans,
     required this.notifications,
     this.clientNames = const <String, String>{},
+    this.reminderTime,
   });
 
   final AppUser user;
   final List<Loan> loans;
   final List<AppNotification> notifications;
   final Map<String, String> clientNames;
+  final TimeOfDay? reminderTime;
 
   @override
   State<_NotificationEffects> createState() => _NotificationEffectsState();
@@ -657,6 +682,8 @@ class _NotificationEffectsState extends State<_NotificationEffects> {
   final Set<String> _knownNotificationIds = <String>{};
   static bool _serviceNotificationPromptShown = false;
   bool _initialized = false;
+  bool _backgroundStarted = false;
+  String? _backgroundUserId;
 
   @override
   void initState() {
@@ -675,8 +702,19 @@ class _NotificationEffectsState extends State<_NotificationEffects> {
       return;
     }
 
-    await LocalNotificationService.startBackgroundNotifications(widget.user.id);
+    if (AppPlatform.isAndroid &&
+        (!_backgroundStarted || _backgroundUserId != widget.user.id)) {
+      await LocalNotificationService.startBackgroundNotifications(widget.user.id);
+      _backgroundStarted = true;
+      _backgroundUserId = widget.user.id;
+    }
     await _maybeSuggestDisablingServiceNotification();
+    if (widget.reminderTime != null) {
+      await LocalNotificationService.setReminderTime(
+        forAdmin: widget.user.isAdmin,
+        time: widget.reminderTime!,
+      );
+    }
 
     final currentIds = widget.notifications.map((item) => item.id).toSet();
     if (!_initialized) {
@@ -686,11 +724,23 @@ class _NotificationEffectsState extends State<_NotificationEffects> {
       _initialized = true;
     } else {
       final newNotifications = widget.notifications
-          .where((item) => !_knownNotificationIds.contains(item.id))
+          .where(
+            (item) =>
+                !_knownNotificationIds.contains(item.id) &&
+                item.type != AppNotificationType.paymentReminder,
+          )
           .toList()
         ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
       if (!AppPlatform.isAndroid) {
         for (final notification in newNotifications) {
+          final shouldDisplay =
+              await LocalNotificationService.shouldDisplayNotification(
+                userId: widget.user.id,
+                notificationId: notification.id,
+              );
+          if (!shouldDisplay) {
+            continue;
+          }
           await LocalNotificationService.showUpdate(
             title: notification.title,
             body: notification.body,
@@ -700,6 +750,10 @@ class _NotificationEffectsState extends State<_NotificationEffects> {
       }
       _knownNotificationIds.addAll(currentIds);
       _knownNotificationIds.removeWhere((id) => !currentIds.contains(id));
+    }
+
+    if (AppPlatform.isAndroid) {
+      return;
     }
 
     if (widget.user.role == UserRole.client) {
@@ -951,6 +1005,8 @@ void _showSettingsSheet(
   Future<void> Function(LoanDefaultsSettings settings)? onSaveLoanDefaults,
   PaymentSettings paymentSettings = const PaymentSettings.empty(),
   Future<void> Function(PaymentSettings settings)? onSavePaymentSettings,
+  Future<void> Function({required int hour, required int minute})?
+  onSaveUserReminderTime,
   AppClockSettings clockSettings = const AppClockSettings.disabled(),
   Future<void> Function(AppClockSettings settings)? onSaveClockSettings,
   BackupService? backupService,
@@ -969,6 +1025,7 @@ void _showSettingsSheet(
       onSaveLoanDefaults: onSaveLoanDefaults,
       paymentSettings: paymentSettings,
       onSavePaymentSettings: onSavePaymentSettings,
+      onSaveUserReminderTime: onSaveUserReminderTime,
       clockSettings: clockSettings,
       onSaveClockSettings: onSaveClockSettings,
       backupService: backupService,
@@ -1011,6 +1068,7 @@ class _SettingsSheet extends StatefulWidget {
     this.onAdminSettingsChanged,
     this.onSaveLoanDefaults,
     this.onSavePaymentSettings,
+    this.onSaveUserReminderTime,
     this.onSaveClockSettings,
     this.backupService,
     this.onClearDatabase,
@@ -1026,6 +1084,8 @@ class _SettingsSheet extends StatefulWidget {
   final Future<void> Function(LoanDefaultsSettings settings)?
   onSaveLoanDefaults;
   final Future<void> Function(PaymentSettings settings)? onSavePaymentSettings;
+  final Future<void> Function({required int hour, required int minute})?
+  onSaveUserReminderTime;
   final Future<void> Function(AppClockSettings settings)? onSaveClockSettings;
   final BackupService? backupService;
   final Future<void> Function()? onClearDatabase;
@@ -1076,12 +1136,14 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       hour: widget.paymentSettings.adminDueReminderHour,
       minute: widget.paymentSettings.adminDueReminderMinute,
     );
-    _clientReminderTime = const TimeOfDay(hour: 10, minute: 0);
+    _clientReminderTime = TimeOfDay(
+      hour: widget.user.reminderHour,
+      minute: widget.user.reminderMinute,
+    );
     _debugTimeEnabled = widget.clockSettings.debugEnabled;
     _debugNow = widget.clockSettings.debugNow == null
         ? null
         : AppClock.toMoscow(widget.clockSettings.debugNow!);
-    unawaited(_loadReminderTimes());
   }
 
   @override
@@ -1092,22 +1154,6 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     _countController.dispose();
     _intervalCountController.dispose();
     super.dispose();
-  }
-
-  Future<void> _loadReminderTimes() async {
-    final adminTime = await LocalNotificationService.getReminderTime(
-      forAdmin: true,
-    );
-    final clientTime = await LocalNotificationService.getReminderTime(
-      forAdmin: false,
-    );
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _adminReminderTime = adminTime;
-      _clientReminderTime = clientTime;
-    });
   }
 
   Future<void> _saveClockSettings({
@@ -1306,34 +1352,6 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     }
   }
 
-  // ignore: unused_element
-  Future<void> _pickAdminReminderTime() async {
-    final picked = await showTimePicker(
-      context: context,
-      initialTime: _adminReminderTime,
-    );
-    if (picked == null || !mounted) {
-      return;
-    }
-
-    setState(() {
-      _adminReminderTime = picked;
-    });
-
-    await widget.onSavePaymentSettings?.call(
-      widget.paymentSettings.copyWith(
-        adminDueReminderHour: picked.hour,
-        adminDueReminderMinute: picked.minute,
-        updatedAt: AppClock.nowForStorage(),
-      ),
-    );
-
-    if (!mounted) {
-      return;
-    }
-    showAppSnackBar('Время напоминания админу: ${picked.format(context)}');
-  }
-
   Future<void> _pickReminderTime({required bool forAdmin}) async {
     final currentTime = forAdmin ? _adminReminderTime : _clientReminderTime;
     final picked = await showTimePicker(
@@ -1344,10 +1362,21 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       return;
     }
 
-    await LocalNotificationService.setReminderTime(
-      forAdmin: forAdmin,
-      time: picked,
-    );
+    if (forAdmin) {
+      await widget.onSavePaymentSettings?.call(
+        widget.paymentSettings.copyWith(
+          adminDueReminderHour: picked.hour,
+          adminDueReminderMinute: picked.minute,
+          updatedAt: AppClock.nowForStorage(),
+        ),
+      );
+    } else {
+      await widget.onSaveUserReminderTime?.call(
+        hour: picked.hour,
+        minute: picked.minute,
+      );
+    }
+    await LocalNotificationService.setReminderTime(forAdmin: forAdmin, time: picked);
     await LocalNotificationService.clearReminderCache();
     await LocalNotificationService.startBackgroundNotifications(widget.user.id);
 

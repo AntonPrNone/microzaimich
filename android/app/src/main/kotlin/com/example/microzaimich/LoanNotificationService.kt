@@ -181,14 +181,19 @@ class LoanNotificationService : Service() {
                         changed = true
                         continue
                     }
+                    if (doc.getString("type") == "paymentReminder") {
+                        delivered.add(doc.id)
+                        changed = true
+                        continue
+                    }
+                    delivered.add(doc.id)
+                    changed = true
 
                     val title = doc.getString("title").orEmpty()
                     val body = doc.getString("body").orEmpty()
                     if (title.isNotBlank() || body.isNotBlank()) {
                         showUpdateNotification(doc.id, title, body)
                     }
-                    delivered.add(doc.id)
-                    changed = true
                 }
 
                 if (changed) {

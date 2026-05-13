@@ -127,6 +127,7 @@ class LoginController extends ChangeNotifier {
     final user = currentUser;
     if (user != null) {
       await LocalNotificationService.clearUserReminders(user.id);
+      await LocalNotificationService.clearShownNotifications(user.id);
     }
     await LocalNotificationService.stopBackgroundNotifications();
     await _sessionService.clear();

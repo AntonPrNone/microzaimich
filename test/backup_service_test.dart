@@ -32,6 +32,8 @@ void main() {
         phone: '79990000000',
         role: UserRole.client,
         password: '1234',
+        reminderHour: 10,
+        reminderMinute: 0,
         createdAt: DateTime.utc(2026, 1, 1, 12),
       );
       await fake.collection('users').doc(user.id).set(user.toMap());
@@ -156,6 +158,8 @@ void main() {
         'phone': '79990000000',
         'role': 'client',
         'password': '1234',
+        'reminderHour': 10,
+        'reminderMinute': 0,
         'createdAt': Timestamp.fromDate(DateTime.utc(2026, 1, 1, 12)),
       });
       await sourceDb.collection('loans').doc('loan-1').set({
@@ -221,6 +225,8 @@ void main() {
         'name': 'Старый',
         'phone': '70000000000',
         'role': 'client',
+        'reminderHour': 12,
+        'reminderMinute': 30,
       });
       await targetDb.collection('app_settings').doc('clock').set({
         'debugEnabled': true,

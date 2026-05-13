@@ -10,6 +10,8 @@ class AppUser {
     required this.phone,
     required this.role,
     required this.password,
+    required this.reminderHour,
+    required this.reminderMinute,
     required this.createdAt,
   });
 
@@ -18,6 +20,8 @@ class AppUser {
   final String phone;
   final UserRole role;
   final String? password;
+  final int reminderHour;
+  final int reminderMinute;
   final DateTime createdAt;
 
   bool get hasPassword => (password ?? '').isNotEmpty;
@@ -29,6 +33,8 @@ class AppUser {
       'phone': phone,
       'role': role.value,
       'password': password,
+      'reminderHour': reminderHour,
+      'reminderMinute': reminderMinute,
       'createdAt': Timestamp.fromDate(createdAt),
     };
   }
@@ -39,6 +45,8 @@ class AppUser {
     String? phone,
     UserRole? role,
     String? password,
+    int? reminderHour,
+    int? reminderMinute,
     DateTime? createdAt,
   }) {
     return AppUser(
@@ -47,6 +55,8 @@ class AppUser {
       phone: phone ?? this.phone,
       role: role ?? this.role,
       password: password ?? this.password,
+      reminderHour: reminderHour ?? this.reminderHour,
+      reminderMinute: reminderMinute ?? this.reminderMinute,
       createdAt: createdAt ?? this.createdAt,
     );
   }
@@ -63,6 +73,9 @@ class AppUser {
       phone: data['phone'] as String? ?? '',
       role: UserRole.fromValue(data['role'] as String? ?? 'client'),
       password: data['password'] as String?,
+      reminderHour: ((data['reminderHour'] as num?)?.toInt() ?? 10).clamp(0, 23),
+      reminderMinute:
+          ((data['reminderMinute'] as num?)?.toInt() ?? 0).clamp(0, 59),
       createdAt: _readDateTime(data['createdAt']),
     );
   }

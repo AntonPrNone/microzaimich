@@ -193,6 +193,8 @@ class AuthRepository {
           'phone': normalizedPhone,
           'role': role.value,
           'password': password,
+          'reminderHour': 10,
+          'reminderMinute': 0,
           'createdAt': Timestamp.fromDate(AppClock.nowForStorage()),
         },
       );
@@ -206,6 +208,8 @@ class AuthRepository {
       phone: normalizedPhone,
       role: role,
       password: password,
+      reminderHour: 10,
+      reminderMinute: 0,
       createdAt: AppClock.nowForStorage(),
     );
     await userRef.set(user.toMap());
@@ -272,6 +276,29 @@ class AuthRepository {
       return;
     }
     await _firestoreService.users.doc(userId).delete();
+  }
+
+  Future<AppUser> updateReminderTime({
+    required AppUser user,
+    required int hour,
+    required int minute,
+  }) async {
+    final updated = user.copyWith(
+      reminderHour: hour.clamp(0, 23),
+      reminderMinute: minute.clamp(0, 59),
+    );
+    if (AppPlatform.isWindows) {
+      await _firestoreService.windowsStream!.updateDocument('users/${user.id}', {
+        'reminderHour': updated.reminderHour,
+        'reminderMinute': updated.reminderMinute,
+      });
+      return updated;
+    }
+    await _firestoreService.users.doc(user.id).update({
+      'reminderHour': updated.reminderHour,
+      'reminderMinute': updated.reminderMinute,
+    });
+    return updated;
   }
 }
 

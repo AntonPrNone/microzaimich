@@ -22,6 +22,7 @@ class LocalNotificationService {
   static const _remindersChannelId = 'loan_reminders';
   static const _adminReminderPrefix = 'admin_reminders_';
   static const _clientReminderPrefix = 'client_reminders_';
+  static const _shownNotificationPrefix = 'shown_notifications_';
   static bool _timezoneReady = false;
 
   static bool get _supportsAndroidNotifications =>
@@ -299,6 +300,32 @@ class LocalNotificationService {
       }
       await prefs.remove(key);
     }
+  }
+
+  static Future<bool> shouldDisplayNotification({
+    required String userId,
+    required String notificationId,
+  }) async {
+    if (kIsWeb) {
+      return true;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final key = '$_shownNotificationPrefix$userId';
+    final shownIds = (prefs.getStringList(key) ?? const <String>[]).toSet();
+    if (shownIds.contains(notificationId)) {
+      return false;
+    }
+    shownIds.add(notificationId);
+    await prefs.setStringList(key, shownIds.toList());
+    return true;
+  }
+
+  static Future<void> clearShownNotifications(String userId) async {
+    if (kIsWeb) {
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('$_shownNotificationPrefix$userId');
   }
 
   static Future<void> testNotification() async {

@@ -9,7 +9,7 @@ import 'package:firedart/generated/google/firestore/v1/query.pb.dart';
 import 'package:grpc/grpc.dart';
 
 import '../../firebase_options.dart';
-import 'windows_firestore_rest_service.dart';
+import 'windows_firestore_document.dart';
 
 class WindowsFirestoreStreamService {
   WindowsFirestoreStreamService._() {
