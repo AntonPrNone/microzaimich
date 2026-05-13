@@ -2,7 +2,6 @@
 
 import 'dart:math' as math;
 
-import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
@@ -19,6 +18,7 @@ import '../../../../data/models/loan.dart';
 import '../../../../data/models/loan_defaults_settings.dart';
 import '../../../../data/models/payment_schedule_item.dart';
 import '../../../../data/models/payment_settings.dart';
+import '../../../../data/services/android_contact_picker_service.dart';
 import '../../../../data/services/app_clock.dart';
 
 final Duration _desktopAwareUiDuration =
@@ -1738,48 +1738,20 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Future<void> _pickClientFromContacts() async {
-    if (!AppPlatform.isAndroid && !AppPlatform.isIOS) {
+    if (!AppPlatform.isAndroid) {
       if (!mounted) return;
-      showAppSnackBar('Импорт контактов доступен только на телефоне');
+      showAppSnackBar('Импорт контактов доступен только на Android');
       return;
     }
 
     try {
-      final hasPermission = await FlutterContacts.requestPermission(
-        readonly: true,
-      );
-      if (!hasPermission) {
-        if (!mounted) return;
-        showAppSnackBar('Нужен доступ к контактам, чтобы импортировать клиента');
-        return;
-      }
-
-      final pickedContact = await FlutterContacts.openExternalPick();
-
+      final pickedContact = await AndroidContactPickerService.pickContact();
       if (pickedContact == null || !mounted) {
         return;
       }
 
-      final contact =
-          pickedContact.phones.isNotEmpty
-              ? pickedContact
-              : await FlutterContacts.getContact(
-                    pickedContact.id,
-                    withProperties: true,
-                    withPhoto: false,
-                    withThumbnail: false,
-                  ) ??
-                  pickedContact;
-
-      final normalizedPhone = contact.phones
-          .map((entry) => entry.number)
-          .map(_normalizeImportedPhone)
-          .firstWhere(
-            (value) => value.isNotEmpty && Validators.phone(value) == null,
-            orElse: () => '',
-          );
-
-      final name = _extractImportedContactName(contact);
+      final normalizedPhone = _normalizeImportedPhone(pickedContact.phone);
+      final name = pickedContact.name.trim();
 
       final nameError = Validators.name(name);
       final phoneError = normalizedPhone.isEmpty ? 'У контакта нет корректного номера' : null;
@@ -1797,17 +1769,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
         _clientNameController.text = name;
         _clientPhoneController.text = _formatImportedPhone(normalizedPhone);
       });
-    } on PlatformException catch (e, st) {
-      debugPrint('Ошибка платформы при выборе контакта: ${e.code}');
-      debugPrint('Message: ${e.message}');
-      debugPrintStack(stackTrace: st);
-
+    } on AndroidContactPickerException catch (e) {
       if (!mounted) return;
 
-      final message = (e.message ?? '').toLowerCase();
       showAppSnackBar(
-        e.code.toLowerCase().contains('permission') ||
-                message.contains('permission')
+        e.code.toLowerCase().contains('permission')
             ? 'Нужен доступ к контактам, чтобы импортировать клиента'
             : 'Не удалось открыть контакты',
       );
@@ -1833,25 +1799,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
 
     return digits;
-  }
-
-  String _extractImportedContactName(Contact contact) {
-    final displayName = contact.displayName.trim();
-    if (displayName.isNotEmpty) {
-      return displayName;
-    }
-
-    final parts = [
-      contact.name.first.trim(),
-      contact.name.middle.trim(),
-      contact.name.last.trim(),
-    ].where((part) => part.isNotEmpty).toList();
-
-    if (parts.isNotEmpty) {
-      return parts.join(' ');
-    }
-
-    return '';
   }
 
   String _formatImportedPhone(String value) {

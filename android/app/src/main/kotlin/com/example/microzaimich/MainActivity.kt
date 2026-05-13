@@ -1,17 +1,26 @@
 package com.example.microzaimich
 
+import android.Manifest
 import android.content.Intent
 import android.content.Context
+import android.content.pm.PackageManager
 import android.app.NotificationManager
+import android.provider.ContactsContract
 import android.provider.Settings
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private val channel = "loan_notifications"
+    private val contactsChannel = "contact_import"
     private val serviceChannelId = "loan_service_status"
     private val servicePrefsName = "loan_notification_service"
+    private val contactPickerRequestCode = 4101
+    private val contactsPermissionRequestCode = 4102
+    private var pendingContactResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -92,5 +101,130 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, contactsChannel)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "pickClientContact" -> handlePickClientContact(result)
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+
+        if (requestCode != contactsPermissionRequestCode) {
+            return
+        }
+
+        if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            launchContactPicker()
+        } else {
+            pendingContactResult?.error(
+                "permission_denied",
+                "READ_CONTACTS permission denied",
+                null,
+            )
+            pendingContactResult = null
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+
+        if (requestCode != contactPickerRequestCode) {
+            return
+        }
+
+        val result = pendingContactResult
+        pendingContactResult = null
+
+        if (result == null) {
+            return
+        }
+
+        if (resultCode != RESULT_OK || data?.data == null) {
+            result.success(null)
+            return
+        }
+
+        val contactUri = data.data ?: run {
+            result.success(null)
+            return
+        }
+
+        try {
+            val projection = arrayOf(
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                ContactsContract.CommonDataKinds.Phone.NUMBER,
+            )
+
+            contentResolver.query(contactUri, projection, null, null, null)?.use { cursor ->
+                if (!cursor.moveToFirst()) {
+                    result.error("empty_contact", "Selected contact has no phone data", null)
+                    return
+                }
+
+                val nameIndex =
+                    cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                val numberIndex =
+                    cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+
+                val name =
+                    if (nameIndex >= 0) cursor.getString(nameIndex).orEmpty() else ""
+                val phone =
+                    if (numberIndex >= 0) cursor.getString(numberIndex).orEmpty() else ""
+
+                result.success(
+                    mapOf(
+                        "name" to name,
+                        "phone" to phone,
+                    )
+                )
+                return
+            }
+
+            result.error("query_failed", "Failed to read selected contact", null)
+        } catch (error: Exception) {
+            result.error("query_failed", error.message, null)
+        }
+    }
+
+    private fun handlePickClientContact(result: MethodChannel.Result) {
+        if (pendingContactResult != null) {
+            result.error("already_active", "Another contact import is already in progress", null)
+            return
+        }
+
+        pendingContactResult = result
+
+        val hasPermission =
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) ==
+                PackageManager.PERMISSION_GRANTED
+
+        if (hasPermission) {
+            launchContactPicker()
+            return
+        }
+
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.READ_CONTACTS),
+            contactsPermissionRequestCode,
+        )
+    }
+
+    private fun launchContactPicker() {
+        val intent = Intent(
+            Intent.ACTION_PICK,
+            ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+        )
+        startActivityForResult(intent, contactPickerRequestCode)
     }
 }

@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Flutter Android Emulator (universal)",
+      "request": "launch",
+      "type": "dart",
+      "flutterMode": "debug",
+      "program": "lib/main.dart",
+      "deviceId": "emulator-5554"
+    },
+    {
+      "name": "Flutter Android Emulator (x86_64)",
+      "request": "launch",
+      "type": "dart",
+      "flutterMode": "debug",
+      "program": "lib/main.dart",
+      "deviceId": "emulator-5554",
+      "preLaunchTask": "flutter: build x86_64 debug apk",
+      "toolArgs": [
+        "--use-application-binary=build/app/outputs/flutter-apk/app-x86_64-debug.apk"
+      ]
+    }
+  ]
+}
