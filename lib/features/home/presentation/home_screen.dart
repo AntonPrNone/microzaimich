@@ -556,11 +556,15 @@ class _AdminHomeState extends State<_AdminHome> {
                                     ],
                                   ),
                                 ),
-                                _NotificationEffects(
-                                  user: widget.currentUser,
-                                  loans: const [],
-                                  notifications: notifications,
-                                ),
+                                      _NotificationEffects(
+                                        user: widget.currentUser,
+                                        loans: loans,
+                                        notifications: notifications,
+                                        clientNames: {
+                                          for (final client in clients)
+                                            client.id: client.name,
+                                        },
+                                      ),
                               ],
                             ),
                           );
@@ -637,11 +641,13 @@ class _NotificationEffects extends StatefulWidget {
     required this.user,
     required this.loans,
     required this.notifications,
+    this.clientNames = const <String, String>{},
   });
 
   final AppUser user;
   final List<Loan> loans;
   final List<AppNotification> notifications;
+  final Map<String, String> clientNames;
 
   @override
   State<_NotificationEffects> createState() => _NotificationEffectsState();
@@ -679,9 +685,36 @@ class _NotificationEffectsState extends State<_NotificationEffects> {
         ..addAll(currentIds);
       _initialized = true;
     } else {
+      final newNotifications = widget.notifications
+          .where((item) => !_knownNotificationIds.contains(item.id))
+          .toList()
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      if (!AppPlatform.isAndroid) {
+        for (final notification in newNotifications) {
+          await LocalNotificationService.showUpdate(
+            title: notification.title,
+            body: notification.body,
+            payload: notification.id,
+          );
+        }
+      }
       _knownNotificationIds.addAll(currentIds);
       _knownNotificationIds.removeWhere((id) => !currentIds.contains(id));
     }
+
+    if (widget.user.role == UserRole.client) {
+      await LocalNotificationService.syncLoanRemindersForUser(
+        widget.user,
+        widget.loans,
+      );
+      return;
+    }
+
+    await LocalNotificationService.syncAdminDueReminders(
+      user: widget.user,
+      loans: widget.loans,
+      clientNames: widget.clientNames,
+    );
   }
 
   Future<void> _maybeSuggestDisablingServiceNotification() async {

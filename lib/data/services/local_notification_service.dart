@@ -20,12 +20,18 @@ class LocalNotificationService {
 
   static const _updatesChannelId = 'loan_updates';
   static const _remindersChannelId = 'loan_reminders';
+  static const _adminReminderPrefix = 'admin_reminders_';
+  static const _clientReminderPrefix = 'client_reminders_';
   static bool _timezoneReady = false;
 
   static bool get _supportsAndroidNotifications =>
       !kIsWeb && AppPlatform.isAndroid;
+  static bool get _supportsAppleNotifications =>
+      !kIsWeb && (AppPlatform.isIOS || AppPlatform.isMacOS);
   static bool get _supportsWindowsNotifications =>
       !kIsWeb && AppPlatform.isWindows;
+  static bool get _supportsLocalReminders =>
+      _supportsAndroidNotifications || _supportsAppleNotifications;
 
   static Future<void> initialize() async {
     if (kIsWeb) {
@@ -33,6 +39,11 @@ class LocalNotificationService {
     }
 
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const darwinInit = DarwinInitializationSettings(
+      requestAlertPermission: false,
+      requestBadgePermission: false,
+      requestSoundPermission: false,
+    );
     const windowsInit = WindowsInitializationSettings(
       appName: 'Микрозаймич',
       appUserModelId: 'Anton.Microzaimich.App.1',
@@ -40,6 +51,8 @@ class LocalNotificationService {
     );
     const initSettings = InitializationSettings(
       android: androidInit,
+      iOS: darwinInit,
+      macOS: darwinInit,
       windows: windowsInit,
     );
 
@@ -50,6 +63,28 @@ class LocalNotificationService {
           .resolvePlatformSpecificImplementation<
               AndroidFlutterLocalNotificationsPlugin>()
           ?.requestNotificationsPermission();
+    }
+
+    if (AppPlatform.isIOS) {
+      await plugin
+          .resolvePlatformSpecificImplementation<
+              IOSFlutterLocalNotificationsPlugin>()
+          ?.requestPermissions(
+            alert: true,
+            badge: true,
+            sound: true,
+          );
+    }
+
+    if (AppPlatform.isMacOS) {
+      await plugin
+          .resolvePlatformSpecificImplementation<
+              MacOSFlutterLocalNotificationsPlugin>()
+          ?.requestPermissions(
+            alert: true,
+            badge: true,
+            sound: true,
+          );
     }
 
     _ensureTimezones();
@@ -73,7 +108,9 @@ class LocalNotificationService {
     required String body,
     String? payload,
   }) async {
-    if (!_supportsAndroidNotifications && !_supportsWindowsNotifications) {
+    if (!_supportsAndroidNotifications &&
+        !_supportsAppleNotifications &&
+        !_supportsWindowsNotifications) {
       return;
     }
 
@@ -88,6 +125,10 @@ class LocalNotificationService {
               priority: Priority.high,
             )
           : null,
+      iOS:
+          _supportsAppleNotifications ? const DarwinNotificationDetails() : null,
+      macOS:
+          _supportsAppleNotifications ? const DarwinNotificationDetails() : null,
       windows: _supportsWindowsNotifications
           ? const WindowsNotificationDetails()
           : null,
@@ -106,19 +147,20 @@ class LocalNotificationService {
     AppUser user,
     List<Loan> loans,
   ) async {
-    if (!_supportsAndroidNotifications) {
+    if (!_supportsLocalReminders) {
       return;
     }
 
     _ensureTimezones();
     final prefs = await SharedPreferences.getInstance();
-    final key = 'scheduled_reminders_${user.id}';
-    final previousIds = (prefs.getStringList(key) ?? <String>[])
+    final key = '$_clientReminderPrefix${user.id}';
+    final previousIds = (prefs.getStringList(key) ?? const <String>[])
         .map(int.tryParse)
         .whereType<int>()
         .toSet();
     final activeIds = <int>{};
     final now = DateTime.now();
+    final reminderTime = await getReminderTime(forAdmin: false);
 
     for (final loan in loans.where((item) => item.status == 'active')) {
       for (final scheduleItem in loan.schedule.where((item) => !item.isPaid)) {
@@ -126,25 +168,26 @@ class LocalNotificationService {
           scheduleItem.dueDate.year,
           scheduleItem.dueDate.month,
           scheduleItem.dueDate.day,
-          10,
+          reminderTime.hour,
+          reminderTime.minute,
         );
         final reminderEntries =
             <({String suffix, DateTime date, String title, String body})>[
-          (
-            suffix: 'day_before',
-            date: dueDate.subtract(const Duration(days: 1)),
-            title: 'Платёж уже завтра',
-            body:
-                'Займ ${_loanLabel(loan)}: до ${Formatters.date(scheduleItem.dueDate)} нужно внести ${Formatters.money(scheduleItem.amount)}',
-          ),
-          (
-            suffix: 'due_today',
-            date: dueDate,
-            title: 'Сегодня срок платежа',
-            body:
-                'Займ ${_loanLabel(loan)}: сегодня нужно внести ${Formatters.money(scheduleItem.amount)}',
-          ),
-        ];
+              (
+                suffix: 'day_before',
+                date: dueDate.subtract(const Duration(days: 1)),
+                title: 'Платёж уже завтра',
+                body:
+                    'Займ ${_loanLabel(loan)}: до ${Formatters.date(scheduleItem.dueDate)} нужно внести ${Formatters.money(scheduleItem.amount)}',
+              ),
+              (
+                suffix: 'due_today',
+                date: dueDate,
+                title: 'Сегодня срок платежа',
+                body:
+                    'Займ ${_loanLabel(loan)}: сегодня нужно внести ${Formatters.money(scheduleItem.amount)}',
+              ),
+            ];
 
         for (final entry in reminderEntries) {
           if (!entry.date.isAfter(now)) {
@@ -165,10 +208,67 @@ class LocalNotificationService {
       }
     }
 
-    for (final id in previousIds.difference(activeIds)) {
-      await plugin.cancel(id);
+    await _dropStaleReminderIds(previousIds, activeIds);
+    await prefs.setStringList(
+      key,
+      activeIds.map((id) => id.toString()).toList(),
+    );
+  }
+
+  static Future<void> syncAdminDueReminders({
+    required AppUser user,
+    required List<Loan> loans,
+    required Map<String, String> clientNames,
+  }) async {
+    if (!_supportsLocalReminders) {
+      return;
     }
 
+    _ensureTimezones();
+    final prefs = await SharedPreferences.getInstance();
+    final key = '$_adminReminderPrefix${user.id}';
+    final previousIds = (prefs.getStringList(key) ?? const <String>[])
+        .map(int.tryParse)
+        .whereType<int>()
+        .toSet();
+    final activeIds = <int>{};
+    final now = DateTime.now();
+    final reminderTime = await getReminderTime(forAdmin: true);
+
+    for (final loan in loans.where((item) => item.status == 'active')) {
+      final clientName = clientNames[loan.userId]?.trim();
+      if (clientName == null || clientName.isEmpty) {
+        continue;
+      }
+
+      for (final scheduleItem in loan.schedule.where((item) => !item.isPaid)) {
+        final scheduledAt = DateTime(
+          scheduleItem.dueDate.year,
+          scheduleItem.dueDate.month,
+          scheduleItem.dueDate.day,
+          reminderTime.hour,
+          reminderTime.minute,
+        );
+        if (!scheduledAt.isAfter(now)) {
+          continue;
+        }
+
+        final id = _stableId(
+          '${user.id}_${loan.id}_${scheduleItem.id}_admin_due',
+        );
+        activeIds.add(id);
+        await _scheduleReminder(
+          id: id,
+          title: 'У клиента сегодня день платежа',
+          body:
+              '$clientName • займ ${_loanLabel(loan)}: сегодня срок платежа ${Formatters.money(scheduleItem.amount)}',
+          scheduledAt: tz.TZDateTime.from(scheduledAt, tz.local),
+          payload: loan.id,
+        );
+      }
+    }
+
+    await _dropStaleReminderIds(previousIds, activeIds);
     await prefs.setStringList(
       key,
       activeIds.map((id) => id.toString()).toList(),
@@ -176,19 +276,23 @@ class LocalNotificationService {
   }
 
   static Future<void> clearUserReminders(String userId) async {
-    if (!_supportsAndroidNotifications) {
+    if (!_supportsLocalReminders) {
       return;
     }
 
     final prefs = await SharedPreferences.getInstance();
-    final key = 'scheduled_reminders_$userId';
-    final ids = (prefs.getStringList(key) ?? <String>[])
-        .map(int.tryParse)
-        .whereType<int>();
-    for (final id in ids) {
-      await plugin.cancel(id);
+    for (final key in <String>[
+      '$_clientReminderPrefix$userId',
+      '$_adminReminderPrefix$userId',
+    ]) {
+      final ids = (prefs.getStringList(key) ?? const <String>[])
+          .map(int.tryParse)
+          .whereType<int>();
+      for (final id in ids) {
+        await plugin.cancel(id);
+      }
+      await prefs.remove(key);
     }
-    await prefs.remove(key);
   }
 
   static Future<void> testNotification() async {
@@ -246,17 +350,29 @@ class LocalNotificationService {
   }
 
   static Future<TimeOfDay> getReminderTime({required bool forAdmin}) async {
-    if (!_supportsAndroidNotifications) {
-      return TimeOfDay(hour: forAdmin ? 18 : 10, minute: 0);
-    }
-    final data = await platform.invokeMapMethod<String, dynamic>(
-      'getReminderTime',
-      {'forAdmin': forAdmin},
-    );
     final defaultHour = forAdmin ? 18 : 10;
+    if (_supportsAndroidNotifications) {
+      final data = await platform.invokeMapMethod<String, dynamic>(
+        'getReminderTime',
+        {'forAdmin': forAdmin},
+      );
+      return TimeOfDay(
+        hour: ((data?['hour'] as num?)?.toInt() ?? defaultHour).clamp(0, 23),
+        minute: ((data?['minute'] as num?)?.toInt() ?? 0).clamp(0, 59),
+      );
+    }
+    if (!_supportsLocalReminders) {
+      return TimeOfDay(hour: defaultHour, minute: 0);
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final prefix = forAdmin ? 'admin' : 'client';
     return TimeOfDay(
-      hour: ((data?['hour'] as num?)?.toInt() ?? defaultHour).clamp(0, 23),
-      minute: ((data?['minute'] as num?)?.toInt() ?? 0).clamp(0, 59),
+      hour: (prefs.getInt('${prefix}_reminder_hour') ?? defaultHour).clamp(
+        0,
+        23,
+      ),
+      minute: (prefs.getInt('${prefix}_reminder_minute') ?? 0).clamp(0, 59),
     );
   }
 
@@ -264,14 +380,22 @@ class LocalNotificationService {
     required bool forAdmin,
     required TimeOfDay time,
   }) async {
-    if (!_supportsAndroidNotifications) {
+    if (_supportsAndroidNotifications) {
+      await platform.invokeMethod('setReminderTime', {
+        'forAdmin': forAdmin,
+        'hour': time.hour,
+        'minute': time.minute,
+      });
       return;
     }
-    await platform.invokeMethod('setReminderTime', {
-      'forAdmin': forAdmin,
-      'hour': time.hour,
-      'minute': time.minute,
-    });
+    if (!_supportsLocalReminders) {
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final prefix = forAdmin ? 'admin' : 'client';
+    await prefs.setInt('${prefix}_reminder_hour', time.hour);
+    await prefs.setInt('${prefix}_reminder_minute', time.minute);
   }
 
   static Future<void> _scheduleReminder({
@@ -281,18 +405,24 @@ class LocalNotificationService {
     required tz.TZDateTime scheduledAt,
     required String payload,
   }) async {
-    if (!_supportsAndroidNotifications) {
+    if (!_supportsLocalReminders) {
       return;
     }
 
-    const details = NotificationDetails(
-      android: AndroidNotificationDetails(
-        _remindersChannelId,
-        'Напоминания о платежах',
-        channelDescription: 'Напоминания за день и в день платежа',
-        importance: Importance.max,
-        priority: Priority.high,
-      ),
+    final details = NotificationDetails(
+      android: _supportsAndroidNotifications
+          ? const AndroidNotificationDetails(
+              _remindersChannelId,
+              'Напоминания о платежах',
+              channelDescription: 'Напоминания за день и в день платежа',
+              importance: Importance.max,
+              priority: Priority.high,
+            )
+          : null,
+      iOS:
+          _supportsAppleNotifications ? const DarwinNotificationDetails() : null,
+      macOS:
+          _supportsAppleNotifications ? const DarwinNotificationDetails() : null,
     );
 
     try {
@@ -306,7 +436,8 @@ class LocalNotificationService {
         payload: payload,
       );
     } on PlatformException catch (error) {
-      if (error.code != 'exact_alarms_not_permitted') {
+      if (!_supportsAndroidNotifications ||
+          error.code != 'exact_alarms_not_permitted') {
         rethrow;
       }
       await plugin.zonedSchedule(
@@ -318,6 +449,15 @@ class LocalNotificationService {
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
         payload: payload,
       );
+    }
+  }
+
+  static Future<void> _dropStaleReminderIds(
+    Set<int> previousIds,
+    Set<int> activeIds,
+  ) async {
+    for (final id in previousIds.difference(activeIds)) {
+      await plugin.cancel(id);
     }
   }
 

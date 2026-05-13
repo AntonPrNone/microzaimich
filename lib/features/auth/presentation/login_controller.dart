@@ -124,6 +124,10 @@ class LoginController extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    final user = currentUser;
+    if (user != null) {
+      await LocalNotificationService.clearUserReminders(user.id);
+    }
     await LocalNotificationService.stopBackgroundNotifications();
     await _sessionService.clear();
     currentUser = null;
