@@ -80,6 +80,9 @@ flutter_launcher_icons:
   android: true
   ios: true
   image_path: assets/icons/app_icon.png
+  web:
+    generate: true
+    image_path: assets/icons/app_icon.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:
