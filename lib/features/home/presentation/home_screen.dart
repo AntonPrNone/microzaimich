@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
@@ -996,7 +997,7 @@ Future<void> _showNotificationsSheet(
   );
 }
 
-void _showSettingsSheet(
+Future<void> _showSettingsSheet(
   BuildContext context,
   AppUser user, {
   bool hideClosedLoans = false,
@@ -1011,27 +1012,57 @@ void _showSettingsSheet(
   Future<void> Function(AppClockSettings settings)? onSaveClockSettings,
   BackupService? backupService,
   Future<void> Function()? onClearDatabase,
-}) {
+}) async {
+  final settingsSheet = _SettingsSheet(
+    user: user,
+    hideClosedLoans: hideClosedLoans,
+    onAdminSettingsChanged: onAdminSettingsChanged,
+    loanDefaults: loanDefaults,
+    onSaveLoanDefaults: onSaveLoanDefaults,
+    paymentSettings: paymentSettings,
+    onSavePaymentSettings: onSavePaymentSettings,
+    onSaveUserReminderTime: onSaveUserReminderTime,
+    clockSettings: clockSettings,
+    onSaveClockSettings: onSaveClockSettings,
+    backupService: backupService,
+    onClearDatabase: onClearDatabase,
+  );
+
+  if (AppPlatform.isIOS) {
+    await Navigator.of(context).push(
+      CupertinoPageRoute<void>(
+        builder: (routeContext) => _SettingsPage(sheet: settingsSheet),
+      ),
+    );
+    return;
+  }
+
   showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
     backgroundColor: Theme.of(context).cardColor,
-    builder: (context) => _SettingsSheet(
-      user: user,
-      hideClosedLoans: hideClosedLoans,
-      onAdminSettingsChanged: onAdminSettingsChanged,
-      loanDefaults: loanDefaults,
-      onSaveLoanDefaults: onSaveLoanDefaults,
-      paymentSettings: paymentSettings,
-      onSavePaymentSettings: onSavePaymentSettings,
-      onSaveUserReminderTime: onSaveUserReminderTime,
-      clockSettings: clockSettings,
-      onSaveClockSettings: onSaveClockSettings,
-      backupService: backupService,
-      onClearDatabase: onClearDatabase,
-    ),
+    builder: (context) => settingsSheet,
   );
+}
+
+class _SettingsPage extends StatelessWidget {
+  const _SettingsPage({required this.sheet});
+
+  final Widget sheet;
+
+  @override
+  Widget build(BuildContext context) {
+    return CupertinoPageScaffold(
+      navigationBar: const CupertinoNavigationBar(
+        middle: Text('Настройки'),
+      ),
+      child: Material(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        child: sheet,
+      ),
+    );
+  }
 }
 
 Future<void> _confirmLogout(BuildContext context) async {
