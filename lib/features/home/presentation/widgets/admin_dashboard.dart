@@ -3218,6 +3218,7 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
                                 const SizedBox(height: 12),
                                 DropdownButtonFormField<String>(
                                   initialValue: _selectedClientId,
+                                  isExpanded: true,
                                   decoration: const InputDecoration(
                                     labelText: 'Клиент',
                                     prefixIcon: Icon(Icons.badge_outlined),
@@ -3228,6 +3229,20 @@ class _LoanEditorSheetState extends State<LoanEditorSheet> {
                                           value: client.id,
                                           child: Text(
                                             '${client.name} • ${Formatters.phone(client.phone)}',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                  selectedItemBuilder: (context) => widget.clients
+                                      .map(
+                                        (client) => Align(
+                                          alignment: Alignment.centerLeft,
+                                          child: Text(
+                                            '${client.name} • ${Formatters.phone(client.phone)}',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
                                           ),
                                         ),
                                       )

@@ -55,7 +55,7 @@ class LoanNotificationService : Service() {
             if (!userId.isNullOrBlank()) {
                 checkLoanReminders(userId)
             }
-            handler.postDelayed(this, 60 * 1000L)
+            scheduleNextReminderCheck()
         }
     }
     private var listenerRegistration: ListenerRegistration? = null
@@ -112,8 +112,14 @@ class LoanNotificationService : Service() {
         attachLoansListener(incomingUserId)
         checkLoanReminders(incomingUserId)
         handler.removeCallbacks(reminderChecker)
-        handler.post(reminderChecker)
+        scheduleNextReminderCheck()
         return START_STICKY
+    }
+
+    private fun scheduleNextReminderCheck() {
+        val now = System.currentTimeMillis()
+        val delay = (60 * 1000L) - (now % (60 * 1000L))
+        handler.postDelayed(reminderChecker, if (delay <= 0L) 60 * 1000L else delay)
     }
 
     private fun createChannels() {
@@ -251,7 +257,7 @@ class LoanNotificationService : Service() {
 
     private fun checkClientLoanReminders(userId: String) {
         val nowCalendar = currentCalendar()
-        val reminderHour = prefs.getInt(KEY_CLIENT_REMINDER_HOUR, 10).coerceIn(0, 23)
+        val reminderHour = prefs.getInt(KEY_CLIENT_REMINDER_HOUR, 18).coerceIn(0, 23)
         val reminderMinute = prefs.getInt(KEY_CLIENT_REMINDER_MINUTE, 0).coerceIn(0, 59)
         val reminderTimeReached = nowCalendar.get(Calendar.HOUR_OF_DAY) > reminderHour ||
             (nowCalendar.get(Calendar.HOUR_OF_DAY) == reminderHour &&

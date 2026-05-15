@@ -383,7 +383,7 @@ class LocalNotificationService {
   }
 
   static Future<TimeOfDay> getReminderTime({required bool forAdmin}) async {
-    final defaultHour = forAdmin ? 18 : 10;
+    final defaultHour = 18;
     if (_supportsAndroidNotifications) {
       final data = await platform.invokeMapMethod<String, dynamic>(
         'getReminderTime',
@@ -501,10 +501,6 @@ class LocalNotificationService {
   }
 
   static String _loanLabel(Loan loan) {
-    final date = loan.issuedAt;
-    final day = date.day.toString().padLeft(2, '0');
-    final month = date.month.toString().padLeft(2, '0');
-    final year = date.year.toString();
-    return '$day.$month.$year';
+    return loan.displayTitle;
   }
 }

@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -10,10 +10,12 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/app_snackbar.dart';
 import '../../../core/utils/platform_utils.dart';
+import '../../../core/utils/web_install_prompt.dart';
 import '../../../core/widgets/ad_navigation_shortcuts.dart';
 import '../../../data/models/app_notification.dart';
 import '../../../data/models/app_clock_settings.dart';
@@ -33,6 +35,50 @@ import '../../../data/services/backup_service.dart';
 import '../../auth/presentation/login_controller.dart';
 import 'widgets/admin_dashboard.dart';
 import 'widgets/client_dashboard.dart';
+
+const _telegramBotUsername = 'microzaimich_bot';
+
+Future<void> _showWebInstallHelpDialog(BuildContext context) async {
+  final message = WebInstallPrompt.isIos
+      ? 'На iPhone и iPad откройте меню браузера и выберите «На экран Домой». В Safari используйте кнопку «Поделиться», в Chrome и Edge — меню браузера.'
+      : 'Откройте меню браузера и выберите «Установить приложение» или «Добавить на рабочий стол».';
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Установка на рабочий стол'),
+      content: Text(message),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: const Text('Понятно'),
+        ),
+      ],
+    ),
+  );
+}
+
+MaterialBanner _buildWebInstallBanner({
+  required BuildContext context,
+  required VoidCallback onDismiss,
+  required VoidCallback onInstall,
+}) {
+  return MaterialBanner(
+    content: const Text(
+      'Для более удобного доступа добавьте Микрозаймич на рабочий стол.',
+    ),
+    leading: const Icon(Icons.install_desktop_rounded),
+    actions: [
+      TextButton(
+        onPressed: onDismiss,
+        child: const Text('Скрыть'),
+      ),
+      FilledButton(
+        onPressed: onInstall,
+        child: Text(WebInstallPrompt.isIos ? 'Как установить' : 'Установить'),
+      ),
+    ],
+  );
+}
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -116,9 +162,13 @@ class _ClientHomeState extends State<_ClientHome> {
   late final Stream<List<AppNotification>> _notificationsStream;
   bool _showTelegramWebBanner = false;
   bool _telegramWebBannerLoaded = false;
+  bool _showWebInstallBanner = false;
+  bool _webInstallBannerLoaded = false;
 
   String get _telegramWebBannerKey =>
       'client_web_tg_banner_dismissed_${widget.currentUser.id}';
+  String get _webInstallBannerKey =>
+      'web_install_banner_dismissed_${widget.currentUser.id}';
 
   @override
   void initState() {
@@ -128,6 +178,7 @@ class _ClientHomeState extends State<_ClientHome> {
     _notificationsStream = widget.notificationRepository.watchForUser(
       widget.currentUser.id,
     );
+    _loadWebInstallBannerState();
     _loadTelegramWebBannerState();
   }
 
@@ -138,6 +189,7 @@ class _ClientHomeState extends State<_ClientHome> {
         oldWidget.currentUser.telegramChatId != widget.currentUser.telegramChatId ||
         oldWidget.currentUser.telegramNotificationsEnabled !=
             widget.currentUser.telegramNotificationsEnabled) {
+      _loadWebInstallBannerState();
       _loadTelegramWebBannerState();
     }
   }
@@ -170,6 +222,30 @@ class _ClientHomeState extends State<_ClientHome> {
     });
   }
 
+  Future<void> _loadWebInstallBannerState() async {
+    if (!AppPlatform.isWeb) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _webInstallBannerLoaded = true;
+        _showWebInstallBanner = false;
+      });
+      return;
+    }
+
+    await WebInstallPrompt.initialize();
+    final prefs = await SharedPreferences.getInstance();
+    final dismissed = prefs.getBool(_webInstallBannerKey) ?? false;
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _webInstallBannerLoaded = true;
+      _showWebInstallBanner = !dismissed && !WebInstallPrompt.isStandalone;
+    });
+  }
+
   Future<void> _dismissTelegramWebBanner() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_telegramWebBannerKey, true);
@@ -179,6 +255,29 @@ class _ClientHomeState extends State<_ClientHome> {
     setState(() {
       _showTelegramWebBanner = false;
     });
+  }
+
+  Future<void> _dismissWebInstallBanner() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_webInstallBannerKey, true);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _showWebInstallBanner = false;
+    });
+  }
+
+  Future<void> _handleWebInstallBannerAction() async {
+    final installed = await WebInstallPrompt.promptInstall();
+    if (installed) {
+      await _dismissWebInstallBanner();
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    await _showWebInstallHelpDialog(context);
   }
 
   @override
@@ -213,7 +312,7 @@ class _ClientHomeState extends State<_ClientHome> {
 
                 return Scaffold(
                   appBar: AppBar(
-                    title: const Text('Мои займы'),
+                    title: const Text('РњРѕРё Р·Р°Р№РјС‹'),
                     actions: [
                       _NotificationsAction(
                         user: widget.currentUser,
@@ -221,7 +320,7 @@ class _ClientHomeState extends State<_ClientHome> {
                         notificationRepository: widget.notificationRepository,
                       ),
                       IconButton(
-                        tooltip: 'Настройки',
+                        tooltip: 'РќР°СЃС‚СЂРѕР№РєРё',
                         onPressed: () => _showSettingsSheet(
                           context,
                           widget.currentUser,
@@ -242,7 +341,7 @@ class _ClientHomeState extends State<_ClientHome> {
                         ),
                       ),
                       IconButton(
-                        tooltip: 'Выйти',
+                        tooltip: 'Р’С‹Р№С‚Рё',
                         onPressed: () => _confirmLogout(context),
                         icon: const Icon(
                           Icons.logout_rounded,
@@ -255,16 +354,22 @@ class _ClientHomeState extends State<_ClientHome> {
                     children: [
                       Column(
                         children: [
+                          if (_webInstallBannerLoaded && _showWebInstallBanner)
+                            _buildWebInstallBanner(
+                              context: context,
+                              onDismiss: _dismissWebInstallBanner,
+                              onInstall: _handleWebInstallBannerAction,
+                            ),
                           if (_telegramWebBannerLoaded && _showTelegramWebBanner)
                             MaterialBanner(
                               content: const Text(
-                                'В веб-версии настоятельно рекомендуется включить уведомления через Telegram-бота в настройках профиля.',
+                                'Р’ РІРµР±-РІРµСЂСЃРёРё РЅР°СЃС‚РѕСЏС‚РµР»СЊРЅРѕ СЂРµРєРѕРјРµРЅРґСѓРµС‚СЃСЏ РІРєР»СЋС‡РёС‚СЊ СѓРІРµРґРѕРјР»РµРЅРёСЏ С‡РµСЂРµР· Telegram-Р±РѕС‚Р° РІ РЅР°СЃС‚СЂРѕР№РєР°С… РїСЂРѕС„РёР»СЏ.',
                               ),
                               leading: const Icon(Icons.telegram_rounded),
                               actions: [
                                 TextButton(
                                   onPressed: _dismissTelegramWebBanner,
-                                  child: const Text('Понятно'),
+                                  child: const Text('РџРѕРЅСЏС‚РЅРѕ'),
                                 ),
                               ],
                             ),
@@ -328,9 +433,13 @@ class _AdminHomeState extends State<_AdminHome> {
   late final Stream<PaymentSettings> _paymentSettingsStream;
   late final Stream<LoanDefaultsSettings> _loanDefaultsStream;
   late final Stream<List<AppNotification>> _notificationsStream;
+  bool _showWebInstallBanner = false;
+  bool _webInstallBannerLoaded = false;
 
   String get _hideClosedLoansKey =>
       'admin_hide_closed_loans_${widget.currentUser.id}';
+  String get _webInstallBannerKey =>
+      'web_install_banner_dismissed_${widget.currentUser.id}';
 
   @override
   void initState() {
@@ -342,7 +451,16 @@ class _AdminHomeState extends State<_AdminHome> {
     _notificationsStream = widget.notificationRepository.watchForUser(
       widget.currentUser.id,
     );
+    _loadWebInstallBannerState();
     _loadAdminSettings();
+  }
+
+  @override
+  void didUpdateWidget(covariant _AdminHome oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentUser.id != widget.currentUser.id) {
+      _loadWebInstallBannerState();
+    }
   }
 
   Future<void> _loadAdminSettings() async {
@@ -377,6 +495,53 @@ class _AdminHomeState extends State<_AdminHome> {
     setState(() {
       _hideClosedLoans = hideClosedLoans;
     });
+  }
+
+  Future<void> _loadWebInstallBannerState() async {
+    if (!AppPlatform.isWeb) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _webInstallBannerLoaded = true;
+        _showWebInstallBanner = false;
+      });
+      return;
+    }
+
+    await WebInstallPrompt.initialize();
+    final prefs = await SharedPreferences.getInstance();
+    final dismissed = prefs.getBool(_webInstallBannerKey) ?? false;
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _webInstallBannerLoaded = true;
+      _showWebInstallBanner = !dismissed && !WebInstallPrompt.isStandalone;
+    });
+  }
+
+  Future<void> _dismissWebInstallBanner() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_webInstallBannerKey, true);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _showWebInstallBanner = false;
+    });
+  }
+
+  Future<void> _handleWebInstallBannerAction() async {
+    final installed = await WebInstallPrompt.promptInstall();
+    if (installed) {
+      await _dismissWebInstallBanner();
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    await _showWebInstallHelpDialog(context);
   }
 
   Future<void> _openLoanEditor(
@@ -484,7 +649,7 @@ class _AdminHomeState extends State<_AdminHome> {
 
                           return Scaffold(
                             appBar: AppBar(
-                              title: const Text('Админ Панель'),
+                              title: const Text('РђРґРјРёРЅ РџР°РЅРµР»СЊ'),
                               actions: [
                                 _NotificationsAction(
                                   user: widget.currentUser,
@@ -493,7 +658,7 @@ class _AdminHomeState extends State<_AdminHome> {
                                       widget.notificationRepository,
                                 ),
                                 IconButton(
-                                  tooltip: 'Настройки',
+                                  tooltip: 'РќР°СЃС‚СЂРѕР№РєРё',
                                   onPressed: () => _showSettingsSheet(
                                     context,
                                     widget.currentUser,
@@ -523,7 +688,7 @@ class _AdminHomeState extends State<_AdminHome> {
                                   ),
                                 ),
                                 IconButton(
-                                  tooltip: 'Выйти',
+                                  tooltip: 'Р’С‹Р№С‚Рё',
                                   onPressed: () => _confirmLogout(context),
                                   icon: const Icon(
                                     Icons.logout_rounded,
@@ -535,119 +700,132 @@ class _AdminHomeState extends State<_AdminHome> {
                                 tabs: [
                                   Tab(
                                     icon: Icon(Icons.people_outline),
-                                    text: 'Клиенты',
+                                    text: 'РљР»РёРµРЅС‚С‹',
                                   ),
                                   Tab(
                                     icon: Icon(
                                       Icons.dashboard_customize_outlined,
                                     ),
-                                    text: 'Управление',
+                                    text: 'РЈРїСЂР°РІР»РµРЅРёРµ',
                                   ),
                                 ],
                               ),
                             ),
                             body: Stack(
                               children: [
-                                AdNavigationShortcuts(
-                                  onPrevious: () {
-                                    final controller = DefaultTabController.of(context);
-                                    if (controller.index > 0) {
-                                      controller.animateTo(controller.index - 1);
-                                    }
-                                  },
-                                  onNext: () {
-                                    final controller = DefaultTabController.of(context);
-                                    if (controller.index < controller.length - 1) {
-                                      controller.animateTo(controller.index + 1);
-                                    }
-                                  },
-                                  child: TabBarView(
-                                    physics: AppPlatform.isWindows
-                                        ? const NeverScrollableScrollPhysics()
-                                        : null,
-                                    children: [
-                                      AdminClientsTab(
-                                      currentViewerId: widget.currentUser.id,
-                                      clients: clients,
-                                      loans: loans,
-                                      hideClosedLoans: _hideClosedLoans,
-                                      watchLoansForUser: widget.loanRepository.watchLoansForUser,
-                                      onEditLoan: (loan) => _openLoanEditor(
-                                        context,
-                                        clients,
-                                        loan,
-                                        loanDefaults,
+                                Column(
+                                  children: [
+                                    if (_webInstallBannerLoaded &&
+                                        _showWebInstallBanner)
+                                      _buildWebInstallBanner(
+                                        context: context,
+                                        onDismiss: _dismissWebInstallBanner,
+                                        onInstall: _handleWebInstallBannerAction,
                                       ),
-                                      onCloseLoan: (
-                                        Loan loan, {
-                                        DateTime? paidAt,
-                                      }) => widget.loanRepository.closeLoan(loan, paidAt: paidAt),
-                                      onDeleteLoan: (loan) =>
-                                          widget.loanRepository.deleteLoan(loan.id),
+                                    Expanded(
+                                      child: AdNavigationShortcuts(
+                                        onPrevious: () {
+                                          final controller = DefaultTabController.of(context);
+                                          if (controller.index > 0) {
+                                            controller.animateTo(controller.index - 1);
+                                          }
+                                        },
+                                        onNext: () {
+                                          final controller = DefaultTabController.of(context);
+                                          if (controller.index < controller.length - 1) {
+                                            controller.animateTo(controller.index + 1);
+                                          }
+                                        },
+                                        child: TabBarView(
+                                          physics: AppPlatform.isWindows
+                                              ? const NeverScrollableScrollPhysics()
+                                              : null,
+                                          children: [
+                                            AdminClientsTab(
+                                            currentViewerId: widget.currentUser.id,
+                                            clients: clients,
+                                            loans: loans,
+                                            hideClosedLoans: _hideClosedLoans,
+                                            watchLoansForUser: widget.loanRepository.watchLoansForUser,
+                                            onEditLoan: (loan) => _openLoanEditor(
+                                              context,
+                                              clients,
+                                              loan,
+                                              loanDefaults,
+                                            ),
+                                            onCloseLoan: (
+                                              Loan loan, {
+                                              DateTime? paidAt,
+                                            }) => widget.loanRepository.closeLoan(loan, paidAt: paidAt),
+                                            onDeleteLoan: (loan) =>
+                                                widget.loanRepository.deleteLoan(loan.id),
+                                          ),
+                                            AdminDashboard(
+                                            clients: clients,
+                                            loans: loans,
+                                            paymentSettings: paymentSettings,
+                                            loanDefaults: loanDefaults,
+                                            onDeleteClients: (clientsToDelete) async {
+                                              for (final client in clientsToDelete) {
+                                                await widget.notificationRepository
+                                                    .deleteForUser(client.id);
+                                                await widget.loanRepository
+                                                    .deleteLoansForUser(client.id);
+                                                await widget.authRepository.deleteUser(
+                                                  client.id,
+                                                );
+                                              }
+                                            },
+                                            onCreateClient: ({
+                                              required String name,
+                                              required String phone,
+                                            }) => widget.authRepository.createUser(
+                                              name: name,
+                                              phone: phone,
+                                              role: UserRole.client,
+                                            ),
+                                            onIssueLoan: ({
+                                              required String userId,
+                                              required String title,
+                                              required double principal,
+                                              required double interestPercent,
+                                              required double totalAmount,
+                                              required double dailyPenaltyAmount,
+                                              required DateTime issuedAt,
+                                              required List<PaymentScheduleItem>
+                                                  schedule,
+                                              required int paymentIntervalCount,
+                                              required String paymentIntervalUnit,
+                                              String? note,
+                                            }) async {
+                                              await widget.loanRepository.createLoan(
+                                                userId: userId,
+                                                title: title,
+                                                principal: principal,
+                                                interestPercent: interestPercent,
+                                                totalAmount: totalAmount,
+                                                dailyPenaltyAmount:
+                                                    dailyPenaltyAmount,
+                                                issuedAt: issuedAt,
+                                                schedule: schedule,
+                                                paymentIntervalCount:
+                                                    paymentIntervalCount,
+                                                paymentIntervalUnit:
+                                                    paymentIntervalUnit,
+                                                note: note,
+                                              );
+                                            },
+                                            onUpdateLoan:
+                                                widget.loanRepository.updateLoan,
+                                            onSavePaymentSettings: widget
+                                                .appSettingsRepository
+                                                .savePaymentSettings,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
                                     ),
-                                      AdminDashboard(
-                                      clients: clients,
-                                      loans: loans,
-                                      paymentSettings: paymentSettings,
-                                      loanDefaults: loanDefaults,
-                                      onDeleteClients: (clientsToDelete) async {
-                                        for (final client in clientsToDelete) {
-                                          await widget.notificationRepository
-                                              .deleteForUser(client.id);
-                                          await widget.loanRepository
-                                              .deleteLoansForUser(client.id);
-                                          await widget.authRepository.deleteUser(
-                                            client.id,
-                                          );
-                                        }
-                                      },
-                                      onCreateClient: ({
-                                        required String name,
-                                        required String phone,
-                                      }) => widget.authRepository.createUser(
-                                        name: name,
-                                        phone: phone,
-                                        role: UserRole.client,
-                                      ),
-                                      onIssueLoan: ({
-                                        required String userId,
-                                        required String title,
-                                        required double principal,
-                                        required double interestPercent,
-                                        required double totalAmount,
-                                        required double dailyPenaltyAmount,
-                                        required DateTime issuedAt,
-                                        required List<PaymentScheduleItem>
-                                            schedule,
-                                        required int paymentIntervalCount,
-                                        required String paymentIntervalUnit,
-                                        String? note,
-                                      }) async {
-                                        await widget.loanRepository.createLoan(
-                                          userId: userId,
-                                          title: title,
-                                          principal: principal,
-                                          interestPercent: interestPercent,
-                                          totalAmount: totalAmount,
-                                          dailyPenaltyAmount:
-                                              dailyPenaltyAmount,
-                                          issuedAt: issuedAt,
-                                          schedule: schedule,
-                                          paymentIntervalCount:
-                                              paymentIntervalCount,
-                                          paymentIntervalUnit:
-                                              paymentIntervalUnit,
-                                          note: note,
-                                        );
-                                      },
-                                      onUpdateLoan:
-                                          widget.loanRepository.updateLoan,
-                                      onSavePaymentSettings: widget
-                                          .appSettingsRepository
-                                          .savePaymentSettings,
-                                      ),
-                                    ],
-                                  ),
+                                  ],
                                 ),
                                       _NotificationEffects(
                                         user: widget.currentUser,
@@ -696,7 +874,7 @@ class _NotificationsAction extends StatelessWidget {
   Widget build(BuildContext context) {
     final unreadCount = notifications.where((item) => !item.isRead).length;
     return IconButton(
-      tooltip: 'Уведомления',
+      tooltip: 'РЈРІРµРґРѕРјР»РµРЅРёСЏ',
       onPressed: () => _showNotificationsSheet(
         context,
         user: user,
@@ -860,21 +1038,21 @@ class _NotificationEffectsState extends State<_NotificationEffects> {
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Сервисное уведомление'),
+        title: const Text('РЎРµСЂРІРёСЃРЅРѕРµ СѓРІРµРґРѕРјР»РµРЅРёРµ'),
         content: const Text(
-          'Чтобы не видеть постоянное уведомление синхронизации, откройте настройки уведомлений приложения и отключите этот канал',
+          'Р§С‚РѕР±С‹ РЅРµ РІРёРґРµС‚СЊ РїРѕСЃС‚РѕСЏРЅРЅРѕРµ СѓРІРµРґРѕРјР»РµРЅРёРµ СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёРё, РѕС‚РєСЂРѕР№С‚Рµ РЅР°СЃС‚СЂРѕР№РєРё СѓРІРµРґРѕРјР»РµРЅРёР№ РїСЂРёР»РѕР¶РµРЅРёСЏ Рё РѕС‚РєР»СЋС‡РёС‚Рµ СЌС‚РѕС‚ РєР°РЅР°Р»',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Позже'),
+            child: const Text('РџРѕР·Р¶Рµ'),
           ),
           FilledButton(
             onPressed: () async {
               Navigator.of(dialogContext).pop();
               await LocalNotificationService.openServiceNotificationSettings();
             },
-            child: const Text('Открыть настройки'),
+            child: const Text('РћС‚РєСЂС‹С‚СЊ РЅР°СЃС‚СЂРѕР№РєРё'),
           ),
         ],
       ),
@@ -924,31 +1102,31 @@ Future<void> _showNotificationsSheet(
                     children: [
                       Expanded(
                         child: Text(
-                          'Уведомления',
+                          'РЈРІРµРґРѕРјР»РµРЅРёСЏ',
                           style: Theme.of(context).textTheme.titleLarge,
                         ),
                       ),
                       if (liveNotifications.isNotEmpty)
                         IconButton(
-                          tooltip: 'Очистить уведомления',
+                          tooltip: 'РћС‡РёСЃС‚РёС‚СЊ СѓРІРµРґРѕРјР»РµРЅРёСЏ',
                           onPressed: () async {
                             final shouldClear = await showDialog<bool>(
                               context: sheetContext,
                               builder: (dialogContext) => AlertDialog(
-                                title: const Text('Очистить уведомления'),
+                                title: const Text('РћС‡РёСЃС‚РёС‚СЊ СѓРІРµРґРѕРјР»РµРЅРёСЏ'),
                                 content: const Text(
-                                  'Все уведомления будут удалены без возможности восстановления',
+                                  'Р’СЃРµ СѓРІРµРґРѕРјР»РµРЅРёСЏ Р±СѓРґСѓС‚ СѓРґР°Р»РµРЅС‹ Р±РµР· РІРѕР·РјРѕР¶РЅРѕСЃС‚Рё РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёСЏ',
                                 ),
                                 actions: [
                                   TextButton(
                                     onPressed: () =>
                                         Navigator.of(dialogContext).pop(false),
-                                    child: const Text('Отмена'),
+                                    child: const Text('РћС‚РјРµРЅР°'),
                                   ),
                                   FilledButton(
                                     onPressed: () =>
                                         Navigator.of(dialogContext).pop(true),
-                                    child: const Text('Удалить'),
+                                    child: const Text('РЈРґР°Р»РёС‚СЊ'),
                                   ),
                                 ],
                               ),
@@ -972,7 +1150,7 @@ Future<void> _showNotificationsSheet(
                             await notificationRepository.markAllAsRead(user.id);
                           },
                           icon: const Icon(Icons.done_all_rounded),
-                          label: const Text('Прочитать все'),
+                          label: const Text('РџСЂРѕС‡РёС‚Р°С‚СЊ РІСЃРµ'),
                         ),
                     ],
                   ),
@@ -980,7 +1158,7 @@ Future<void> _showNotificationsSheet(
                   if (liveNotifications.isEmpty)
                     const Padding(
                       padding: EdgeInsets.only(top: 8),
-                      child: Text('Пока уведомлений нет'),
+                      child: Text('РџРѕРєР° СѓРІРµРґРѕРјР»РµРЅРёР№ РЅРµС‚'),
                     )
                   else
                     Flexible(
@@ -1130,7 +1308,7 @@ class _SettingsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return CupertinoPageScaffold(
       navigationBar: const CupertinoNavigationBar(
-        middle: Text('Настройки'),
+        middle: Text('РќР°СЃС‚СЂРѕР№РєРё'),
       ),
       child: Material(
         color: Theme.of(context).scaffoldBackgroundColor,
@@ -1144,16 +1322,16 @@ Future<void> _confirmLogout(BuildContext context) async {
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (dialogContext) => AlertDialog(
-      title: const Text('Выйти из профиля'),
-      content: const Text('Подтвердите выход из текущего профиля на этом устройстве.'),
+      title: const Text('Р’С‹Р№С‚Рё РёР· РїСЂРѕС„РёР»СЏ'),
+      content: const Text('РџРѕРґС‚РІРµСЂРґРёС‚Рµ РІС‹С…РѕРґ РёР· С‚РµРєСѓС‰РµРіРѕ РїСЂРѕС„РёР»СЏ РЅР° СЌС‚РѕРј СѓСЃС‚СЂРѕР№СЃС‚РІРµ.'),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(false),
-          child: const Text('Отмена'),
+          child: const Text('РћС‚РјРµРЅР°'),
         ),
         FilledButton(
           onPressed: () => Navigator.of(dialogContext).pop(true),
-          child: const Text('Выйти'),
+          child: const Text('Р’С‹Р№С‚Рё'),
         ),
       ],
     ),
@@ -1364,7 +1542,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
           'microzaimich-backup-${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}-${now.minute.toString().padLeft(2, '0')}.json';
       if (AppPlatform.isWindows || AppPlatform.isLinux || AppPlatform.isMacOS) {
         final targetPath = await FilePicker.platform.saveFile(
-          dialogTitle: 'Сохранить резервную копию',
+          dialogTitle: 'РЎРѕС…СЂР°РЅРёС‚СЊ СЂРµР·РµСЂРІРЅСѓСЋ РєРѕРїРёСЋ',
           fileName: suggestedName,
           type: FileType.custom,
           allowedExtensions: const ['json'],
@@ -1384,8 +1562,8 @@ class _SettingsSheetState extends State<_SettingsSheet> {
               name: suggestedName,
             ),
           ],
-          subject: 'Резервная копия Microzaimich',
-          text: 'Резервная копия базы данных приложения',
+          subject: 'Р РµР·РµСЂРІРЅР°СЏ РєРѕРїРёСЏ Microzaimich',
+          text: 'Р РµР·РµСЂРІРЅР°СЏ РєРѕРїРёСЏ Р±Р°Р·С‹ РґР°РЅРЅС‹С… РїСЂРёР»РѕР¶РµРЅРёСЏ',
           fileNameOverrides: [suggestedName],
         );
       } else {
@@ -1394,8 +1572,8 @@ class _SettingsSheetState extends State<_SettingsSheet> {
         await backupFile.writeAsString(json, flush: true);
         await Share.shareXFiles(
         [XFile(backupFile.path, mimeType: 'application/json')],
-        subject: 'Резервная копия Microzaimich',
-        text: 'Резервная копия базы данных приложения',
+        subject: 'Р РµР·РµСЂРІРЅР°СЏ РєРѕРїРёСЏ Microzaimich',
+        text: 'Р РµР·РµСЂРІРЅР°СЏ РєРѕРїРёСЏ Р±Р°Р·С‹ РґР°РЅРЅС‹С… РїСЂРёР»РѕР¶РµРЅРёСЏ',
       fileNameOverrides: [suggestedName],
       );
       }
@@ -1403,12 +1581,12 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       if (!mounted) {
         return;
       }
-      showAppSnackBar('Файл резервной копии подготовлен для сохранения');
+      showAppSnackBar('Р¤Р°Р№Р» СЂРµР·РµСЂРІРЅРѕР№ РєРѕРїРёРё РїРѕРґРіРѕС‚РѕРІР»РµРЅ РґР»СЏ СЃРѕС…СЂР°РЅРµРЅРёСЏ');
     } on Object catch (error) {
       if (!mounted) {
         return;
       }
-      showAppSnackBar('Не удалось сохранить резервную копию: $error');
+      showAppSnackBar('РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ СЂРµР·РµСЂРІРЅСѓСЋ РєРѕРїРёСЋ: $error');
     } finally {
       if (mounted) {
         setState(() {
@@ -1426,18 +1604,18 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Восстановить базу из файла'),
+        title: const Text('Р’РѕСЃСЃС‚Р°РЅРѕРІРёС‚СЊ Р±Р°Р·Сѓ РёР· С„Р°Р№Р»Р°'),
         content: const Text(
-          'Текущая база будет полностью очищена и заменена данными из резервной копии. Пользователи, займы, уведомления и настройки будут перезаписаны без возможности отмены.',
+          'РўРµРєСѓС‰Р°СЏ Р±Р°Р·Р° Р±СѓРґРµС‚ РїРѕР»РЅРѕСЃС‚СЊСЋ РѕС‡РёС‰РµРЅР° Рё Р·Р°РјРµРЅРµРЅР° РґР°РЅРЅС‹РјРё РёР· СЂРµР·РµСЂРІРЅРѕР№ РєРѕРїРёРё. РџРѕР»СЊР·РѕРІР°С‚РµР»Рё, Р·Р°Р№РјС‹, СѓРІРµРґРѕРјР»РµРЅРёСЏ Рё РЅР°СЃС‚СЂРѕР№РєРё Р±СѓРґСѓС‚ РїРµСЂРµР·Р°РїРёСЃР°РЅС‹ Р±РµР· РІРѕР·РјРѕР¶РЅРѕСЃС‚Рё РѕС‚РјРµРЅС‹.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Отмена'),
+            child: const Text('РћС‚РјРµРЅР°'),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Восстановить'),
+            child: const Text('Р’РѕСЃСЃС‚Р°РЅРѕРІРёС‚СЊ'),
           ),
         ],
       ),
@@ -1473,19 +1651,19 @@ class _SettingsSheetState extends State<_SettingsSheet> {
         }
       }
       if (json == null) {
-        throw const BackupException('Не удалось прочитать выбранный файл');
+        throw const BackupException('РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ РІС‹Р±СЂР°РЅРЅС‹Р№ С„Р°Р№Р»');
       }
       await widget.backupService!.importBackupJson(json);
 
       if (!mounted) {
         return;
       }
-      showAppSnackBar('База данных восстановлена из файла');
+      showAppSnackBar('Р‘Р°Р·Р° РґР°РЅРЅС‹С… РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅР° РёР· С„Р°Р№Р»Р°');
     } on Object catch (error) {
       if (!mounted) {
         return;
       }
-      showAppSnackBar('Не удалось восстановить резервную копию: $error');
+      showAppSnackBar('РќРµ СѓРґР°Р»РѕСЃСЊ РІРѕСЃСЃС‚Р°РЅРѕРІРёС‚СЊ СЂРµР·РµСЂРІРЅСѓСЋ РєРѕРїРёСЋ: $error');
     } finally {
       if (mounted) {
         setState(() {
@@ -1535,8 +1713,8 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     });
     showAppSnackBar(
       forAdmin
-          ? 'Время уведомлений о платежах клиентов: ${picked.format(context)}'
-          : 'Время ваших напоминаний о платежах: ${picked.format(context)}',
+          ? 'Р’СЂРµРјСЏ СѓРІРµРґРѕРјР»РµРЅРёР№ Рѕ РїР»Р°С‚РµР¶Р°С… РєР»РёРµРЅС‚РѕРІ: ${picked.format(context)}'
+          : 'Р’СЂРµРјСЏ РІР°С€РёС… РЅР°РїРѕРјРёРЅР°РЅРёР№ Рѕ РїР»Р°С‚РµР¶Р°С…: ${picked.format(context)}',
     );
   }
 
@@ -1550,7 +1728,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) => AlertDialog(
-            title: const Text('Сменить пароль'),
+            title: const Text('РЎРјРµРЅРёС‚СЊ РїР°СЂРѕР»СЊ'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -1558,7 +1736,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   controller: passwordController,
                   obscureText: true,
                   decoration: const InputDecoration(
-                    labelText: 'Новый пароль',
+                    labelText: 'РќРѕРІС‹Р№ РїР°СЂРѕР»СЊ',
                     prefixIcon: Icon(Icons.lock_outline_rounded),
                   ),
                 ),
@@ -1567,7 +1745,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   controller: confirmController,
                   obscureText: true,
                   decoration: const InputDecoration(
-                    labelText: 'Повторите пароль',
+                    labelText: 'РџРѕРІС‚РѕСЂРёС‚Рµ РїР°СЂРѕР»СЊ',
                     prefixIcon: Icon(Icons.verified_user_outlined),
                   ),
                 ),
@@ -1588,7 +1766,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(dialogContext).pop(false),
-                child: const Text('Отмена'),
+                child: const Text('РћС‚РјРµРЅР°'),
               ),
               FilledButton(
                 onPressed: () {
@@ -1596,19 +1774,19 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   final confirm = confirmController.text.trim();
                   if (password.length < 4) {
                     setDialogState(() {
-                      validationError = 'Пароль должен быть не короче 4 символов';
+                      validationError = 'РџР°СЂРѕР»СЊ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РЅРµ РєРѕСЂРѕС‡Рµ 4 СЃРёРјРІРѕР»РѕРІ';
                     });
                     return;
                   }
                   if (password != confirm) {
                     setDialogState(() {
-                      validationError = 'Пароли не совпадают';
+                      validationError = 'РџР°СЂРѕР»Рё РЅРµ СЃРѕРІРїР°РґР°СЋС‚';
                     });
                     return;
                   }
                   Navigator.of(dialogContext).pop(true);
                 },
-                child: const Text('Сохранить'),
+                child: const Text('РЎРѕС…СЂР°РЅРёС‚СЊ'),
               ),
             ],
           ),
@@ -1626,9 +1804,9 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       await context.read<LoginController>().changePassword(
         passwordController.text.trim(),
       );
-      showAppSnackBar('Пароль обновлён');
+      showAppSnackBar('РџР°СЂРѕР»СЊ РѕР±РЅРѕРІР»С‘РЅ');
     } on Object catch (error) {
-      showAppSnackBar('Не удалось сменить пароль: $error');
+      showAppSnackBar('РќРµ СѓРґР°Р»РѕСЃСЊ СЃРјРµРЅРёС‚СЊ РїР°СЂРѕР»СЊ: $error');
     } finally {
       passwordController.dispose();
       confirmController.dispose();
@@ -1646,9 +1824,9 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       setState(() {
         _telegramLinkCode = updated.telegramLinkCode;
       });
-      showAppSnackBar('Код привязки Telegram обновлён');
+      showAppSnackBar('РљРѕРґ РїСЂРёРІСЏР·РєРё Telegram РѕР±РЅРѕРІР»С‘РЅ');
     } on Object catch (error) {
-      showAppSnackBar('Не удалось обновить код Telegram: $error');
+      showAppSnackBar('РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ РєРѕРґ Telegram: $error');
     }
   }
 
@@ -1661,26 +1839,53 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     if ((_telegramLinkCode ?? '').isEmpty || _telegramLinkCode == previousCode) {
       return;
     }
-    await _copyTelegramCommand();
+    await _openTelegramBotWithCode();
     if (!mounted) {
       return;
     }
   }
 
+  Future<void> _openTelegramBotWithCode() async {
+    final code = _telegramLinkCode;
+    if (code == null || code.isEmpty) {
+      showAppSnackBar('РЎРЅР°С‡Р°Р»Р° СЃРѕР·РґР°Р№С‚Рµ РєРѕРґ РїСЂРёРІСЏР·РєРё Telegram');
+      return;
+    }
+
+    final botUri = Uri.parse('https://t.me/$_telegramBotUsername?start=$code');
+    final opened = await launchUrl(
+      botUri,
+      mode: AppPlatform.isWeb
+          ? LaunchMode.platformDefault
+          : LaunchMode.externalApplication,
+    );
+
+    if (opened) {
+      showAppSnackBar('РћС‚РєСЂС‹С‚ Telegram-Р±РѕС‚ СЃ РєРѕРґРѕРј РїСЂРёРІСЏР·РєРё');
+      return;
+    }
+
+    await _copyTelegramCommand();
+    if (!mounted) {
+      return;
+    }
+    showAppSnackBar('РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РєСЂС‹С‚СЊ Telegram-Р±РѕС‚Р°, РєРѕРјР°РЅРґР° /start СЃРєРѕРїРёСЂРѕРІР°РЅР°');
+  }
+
   Future<void> _copyTelegramCommand() async {
     final code = _telegramLinkCode;
     if (code == null || code.isEmpty) {
-      showAppSnackBar('Сначала создайте код привязки Telegram');
+      showAppSnackBar('РЎРЅР°С‡Р°Р»Р° СЃРѕР·РґР°Р№С‚Рµ РєРѕРґ РїСЂРёРІСЏР·РєРё Telegram');
       return;
     }
     await Clipboard.setData(ClipboardData(text: '/start $code'));
-    showAppSnackBar('Команда /start скопирована');
+    showAppSnackBar('РљРѕРјР°РЅРґР° /start СЃРєРѕРїРёСЂРѕРІР°РЅР°');
   }
 
 
   Future<void> _toggleTelegramNotifications(bool enabled) async {
     if ((_telegramChatId ?? '').isEmpty) {
-      showAppSnackBar('Сначала привяжите Telegram к профилю');
+      showAppSnackBar('РЎРЅР°С‡Р°Р»Р° РїСЂРёРІСЏР¶РёС‚Рµ Telegram Рє РїСЂРѕС„РёР»СЋ');
       return;
     }
     try {
@@ -1698,11 +1903,11 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       });
       showAppSnackBar(
         enabled
-            ? 'Уведомления в Telegram включены'
-            : 'Уведомления в Telegram отключены',
+            ? 'РЈРІРµРґРѕРјР»РµРЅРёСЏ РІ Telegram РІРєР»СЋС‡РµРЅС‹'
+            : 'РЈРІРµРґРѕРјР»РµРЅРёСЏ РІ Telegram РѕС‚РєР»СЋС‡РµРЅС‹',
       );
     } on Object catch (error) {
-      showAppSnackBar('Не удалось обновить Telegram-настройки: $error');
+      showAppSnackBar('РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ Telegram-РЅР°СЃС‚СЂРѕР№РєРё: $error');
     }
   }
 
@@ -1723,9 +1928,9 @@ class _SettingsSheetState extends State<_SettingsSheet> {
         _telegramLinkedAt = updated.telegramLinkedAt;
         _telegramNotificationsEnabled = updated.telegramNotificationsEnabled;
       });
-      showAppSnackBar('Telegram отвязан от профиля');
+      showAppSnackBar('Telegram РѕС‚РІСЏР·Р°РЅ РѕС‚ РїСЂРѕС„РёР»СЏ');
     } on Object catch (error) {
-      showAppSnackBar('Не удалось отвязать Telegram: $error');
+      showAppSnackBar('РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РІСЏР·Р°С‚СЊ Telegram: $error');
     }
   }
 
@@ -1737,22 +1942,22 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Очистить всю базу'),
+        title: const Text('РћС‡РёСЃС‚РёС‚СЊ РІСЃСЋ Р±Р°Р·Сѓ'),
         content: const Text(
-          'Будут удалены все клиенты, займы, уведомления и настройки. '
-          'Сохранится только текущий профиль администратора. Действие необратимо.',
+          'Р‘СѓРґСѓС‚ СѓРґР°Р»РµРЅС‹ РІСЃРµ РєР»РёРµРЅС‚С‹, Р·Р°Р№РјС‹, СѓРІРµРґРѕРјР»РµРЅРёСЏ Рё РЅР°СЃС‚СЂРѕР№РєРё. '
+          'РЎРѕС…СЂР°РЅРёС‚СЃСЏ С‚РѕР»СЊРєРѕ С‚РµРєСѓС‰РёР№ РїСЂРѕС„РёР»СЊ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°. Р”РµР№СЃС‚РІРёРµ РЅРµРѕР±СЂР°С‚РёРјРѕ.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Отмена'),
+            child: const Text('РћС‚РјРµРЅР°'),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: const Color(0xFFE85B5B),
             ),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Очистить'),
+            child: const Text('РћС‡РёСЃС‚РёС‚СЊ'),
           ),
         ],
       ),
@@ -1772,13 +1977,13 @@ class _SettingsSheetState extends State<_SettingsSheet> {
         return;
       }
       showAppSnackBar(
-        'База очищена. Сохранён только текущий профиль администратора.',
+        'Р‘Р°Р·Р° РѕС‡РёС‰РµРЅР°. РЎРѕС…СЂР°РЅС‘РЅ С‚РѕР»СЊРєРѕ С‚РµРєСѓС‰РёР№ РїСЂРѕС„РёР»СЊ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°.',
       );
     } on Object catch (error) {
       if (!mounted) {
         return;
       }
-      showAppSnackBar('Не удалось очистить базу: $error');
+      showAppSnackBar('РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‡РёСЃС‚РёС‚СЊ Р±Р°Р·Сѓ: $error');
     } finally {
       if (mounted) {
         setState(() {
@@ -1790,38 +1995,38 @@ class _SettingsSheetState extends State<_SettingsSheet> {
 
   Future<void> _sendTestUpdateNotification() async {
     await LocalNotificationService.showUpdate(
-      title: 'Тестовое уведомление',
-      body: 'Проверка обычного мгновенного уведомления администратору.',
+      title: 'РўРµСЃС‚РѕРІРѕРµ СѓРІРµРґРѕРјР»РµРЅРёРµ',
+      body: 'РџСЂРѕРІРµСЂРєР° РѕР±С‹С‡РЅРѕРіРѕ РјРіРЅРѕРІРµРЅРЅРѕРіРѕ СѓРІРµРґРѕРјР»РµРЅРёСЏ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂСѓ.',
     );
     if (!mounted) {
       return;
     }
-    showAppSnackBar('Тестовое уведомление отправлено');
+    showAppSnackBar('РўРµСЃС‚РѕРІРѕРµ СѓРІРµРґРѕРјР»РµРЅРёРµ РѕС‚РїСЂР°РІР»РµРЅРѕ');
   }
 
   Future<void> _sendTestAdminReminderNotification() async {
     await LocalNotificationService.showUpdate(
-      title: 'У клиента сегодня день платежа',
-      body: 'Тест: у клиента сегодня срок платежа 1 000,00 ₽.',
+      title: 'РЈ РєР»РёРµРЅС‚Р° СЃРµРіРѕРґРЅСЏ РґРµРЅСЊ РїР»Р°С‚РµР¶Р°',
+      body: 'РўРµСЃС‚: Сѓ РєР»РёРµРЅС‚Р° СЃРµРіРѕРґРЅСЏ СЃСЂРѕРє РїР»Р°С‚РµР¶Р° 1 000,00 в‚Ѕ.',
     );
     if (!mounted) {
       return;
     }
-    showAppSnackBar('Тестовое напоминание админу отправлено');
+    showAppSnackBar('РўРµСЃС‚РѕРІРѕРµ РЅР°РїРѕРјРёРЅР°РЅРёРµ Р°РґРјРёРЅСѓ РѕС‚РїСЂР°РІР»РµРЅРѕ');
   }
 
   List<Widget> _buildCommonSettingsSections(BuildContext context) {
     final reminderTitle = _isAdmin
-        ? 'Время уведомлений о платежах клиентов'
-        : 'Время моих напоминаний о платежах';
+        ? 'Р’СЂРµРјСЏ СѓРІРµРґРѕРјР»РµРЅРёР№ Рѕ РїР»Р°С‚РµР¶Р°С… РєР»РёРµРЅС‚РѕРІ'
+        : 'Р’СЂРµРјСЏ РјРѕРёС… РЅР°РїРѕРјРёРЅР°РЅРёР№ Рѕ РїР»Р°С‚РµР¶Р°С…';
     final reminderSubtitle = _isAdmin
-        ? 'Когда на этом устройстве напоминать администратору о клиентах, у которых сегодня день платежа'
-        : 'Когда на этом устройстве показывать напоминания за день и в день вашего платежа';
+        ? 'РљРѕРіРґР° РЅР° СЌС‚РѕРј СѓСЃС‚СЂРѕР№СЃС‚РІРµ РЅР°РїРѕРјРёРЅР°С‚СЊ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂСѓ Рѕ РєР»РёРµРЅС‚Р°С…, Сѓ РєРѕС‚РѕСЂС‹С… СЃРµРіРѕРґРЅСЏ РґРµРЅСЊ РїР»Р°С‚РµР¶Р°'
+        : 'РљРѕРіРґР° РЅР° СЌС‚РѕРј СѓСЃС‚СЂРѕР№СЃС‚РІРµ РїРѕРєР°Р·С‹РІР°С‚СЊ РЅР°РїРѕРјРёРЅР°РЅРёСЏ Р·Р° РґРµРЅСЊ Рё РІ РґРµРЅСЊ РІР°С€РµРіРѕ РїР»Р°С‚РµР¶Р°';
     final reminderTime = _isAdmin ? _adminReminderTime : _clientReminderTime;
 
     return [
       _SettingsSectionCard(
-        title: 'Уведомления',
+        title: 'РЈРІРµРґРѕРјР»РµРЅРёСЏ',
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1845,7 +2050,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 child: OutlinedButton.icon(
                   onPressed: _sendTestUpdateNotification,
                   icon: const Icon(Icons.campaign_outlined),
-                  label: const Text('Тест обычного уведомления'),
+                  label: const Text('РўРµСЃС‚ РѕР±С‹С‡РЅРѕРіРѕ СѓРІРµРґРѕРјР»РµРЅРёСЏ'),
                 ),
               ),
               const SizedBox(height: 12),
@@ -1854,7 +2059,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 child: OutlinedButton.icon(
                   onPressed: _sendTestAdminReminderNotification,
                   icon: const Icon(Icons.notifications_active_outlined),
-                  label: const Text('Тест напоминания админу'),
+                  label: const Text('РўРµСЃС‚ РЅР°РїРѕРјРёРЅР°РЅРёСЏ Р°РґРјРёРЅСѓ'),
                 ),
               ),
             ],
@@ -1863,13 +2068,13 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       ),
       const SizedBox(height: 16),
       _SettingsSectionCard(
-        title: 'Безопасность',
+        title: 'Р‘РµР·РѕРїР°СЃРЅРѕСЃС‚СЊ',
         child: SizedBox(
           width: double.infinity,
           child: OutlinedButton.icon(
             onPressed: _changePassword,
             icon: const Icon(Icons.lock_reset_outlined),
-            label: const Text('Сменить пароль'),
+            label: const Text('РЎРјРµРЅРёС‚СЊ РїР°СЂРѕР»СЊ'),
           ),
         ),
       ),
@@ -1888,28 +2093,28 @@ class _SettingsSheetState extends State<_SettingsSheet> {
             children: [
               Text(
                 (_telegramChatId ?? '').isNotEmpty
-                    ? 'Telegram уже привязан к этому профилю.'
-                    : 'Создайте код и отправьте боту команду /start с этим кодом.',
+                    ? 'Telegram СѓР¶Рµ РїСЂРёРІСЏР·Р°РЅ Рє СЌС‚РѕРјСѓ РїСЂРѕС„РёР»СЋ.'
+                    : 'РЎРѕР·РґР°Р№С‚Рµ РєРѕРґ Рё РѕС‚РїСЂР°РІСЊС‚Рµ Р±РѕС‚Сѓ @microzaimich_bot РєРѕРјР°РЅРґСѓ /start СЃ СЌС‚РёРј РєРѕРґРѕРј.',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
               const SizedBox(height: 12),
               if ((_telegramLinkCode ?? '').isNotEmpty)
                 SelectableText(
-                  'Код: $_telegramLinkCode',
+                  'РљРѕРґ: $_telegramLinkCode',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
               if ((_telegramChatId ?? '').isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Text(
                   _telegramUsername?.isNotEmpty == true
-                      ? 'Подключён аккаунт: @$_telegramUsername'
-                      : 'Подключён Telegram-чат: $_telegramChatId',
+                      ? 'РџРѕРґРєР»СЋС‡С‘РЅ Р°РєРєР°СѓРЅС‚: @$_telegramUsername'
+                      : 'РџРѕРґРєР»СЋС‡С‘РЅ Telegram-С‡Р°С‚: $_telegramChatId',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 if (_telegramLinkedAt != null) ...[
                   const SizedBox(height: 4),
                   Text(
-                    'Привязано: ${Formatters.dateTime(_telegramLinkedAt!)}',
+                    'РџСЂРёРІСЏР·Р°РЅРѕ: ${Formatters.dateTime(_telegramLinkedAt!)}',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
@@ -1922,15 +2127,15 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   icon: const Icon(Icons.password_rounded),
                   label: Text(
                     (_telegramLinkCode ?? '').isEmpty
-                        ? 'Создать код привязки'
-                        : 'Обновить код привязки',
+                        ? 'РЎРѕР·РґР°С‚СЊ РєРѕРґ РїСЂРёРІСЏР·РєРё'
+                        : 'РћР±РЅРѕРІРёС‚СЊ РєРѕРґ РїСЂРёРІСЏР·РєРё',
                   ),
                 ),
               ),
 
               const SizedBox(height: 12),
               Text(
-                'После создания или обновления кода команда /start копируется автоматически. Статус Telegram обновляется сам по live-данным профиля.',
+                'РџРѕСЃР»Рµ СЃРѕР·РґР°РЅРёСЏ РёР»Рё РѕР±РЅРѕРІР»РµРЅРёСЏ РєРѕРґР° РєРѕРјР°РЅРґР° /start РєРѕРїРёСЂСѓРµС‚СЃСЏ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё. РЎС‚Р°С‚СѓСЃ Telegram РѕР±РЅРѕРІР»СЏРµС‚СЃСЏ СЃР°Рј РїРѕ live-РґР°РЅРЅС‹Рј РїСЂРѕС„РёР»СЏ.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               if ((_telegramChatId ?? '').isNotEmpty) ...[
@@ -1938,9 +2143,9 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   secondary: const Icon(Icons.send_rounded),
-                  title: const Text('Уведомления в Telegram'),
+                  title: const Text('РЈРІРµРґРѕРјР»РµРЅРёСЏ РІ Telegram'),
                   subtitle: const Text(
-                    'Отправлять новые уведомления в подключённый Telegram-чат',
+                    'РћС‚РїСЂР°РІР»СЏС‚СЊ РЅРѕРІС‹Рµ СѓРІРµРґРѕРјР»РµРЅРёСЏ РІ РїРѕРґРєР»СЋС‡С‘РЅРЅС‹Р№ Telegram-С‡Р°С‚',
                   ),
                   value: _telegramNotificationsEnabled,
                   onChanged: _toggleTelegramNotifications,
@@ -1951,7 +2156,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   child: OutlinedButton.icon(
                     onPressed: _disconnectTelegram,
                     icon: const Icon(Icons.link_off_rounded),
-                    label: const Text('Отвязать Telegram'),
+                    label: const Text('РћС‚РІСЏР·Р°С‚СЊ Telegram'),
                   ),
                 ),
               ],
@@ -1966,13 +2171,13 @@ class _SettingsSheetState extends State<_SettingsSheet> {
   List<Widget> _buildAdminSettingsSections(BuildContext context) {
     return [
       _SettingsSectionCard(
-        title: 'Отображение',
+        title: 'РћС‚РѕР±СЂР°Р¶РµРЅРёРµ',
         child: SwitchListTile(
           contentPadding: EdgeInsets.zero,
           secondary: const Icon(Icons.visibility_off_outlined),
-          title: const Text('Скрыть выплаченные займы'),
+          title: const Text('РЎРєСЂС‹С‚СЊ РІС‹РїР»Р°С‡РµРЅРЅС‹Рµ Р·Р°Р№РјС‹'),
           subtitle: const Text(
-            'В списке клиентов показывать только займы в процессе',
+            'Р’ СЃРїРёСЃРєРµ РєР»РёРµРЅС‚РѕРІ РїРѕРєР°Р·С‹РІР°С‚СЊ С‚РѕР»СЊРєРѕ Р·Р°Р№РјС‹ РІ РїСЂРѕС†РµСЃСЃРµ',
           ),
           value: _hideClosedLoans,
           onChanged: (value) async {
@@ -1987,14 +2192,14 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       ),
       const SizedBox(height: 16),
       _SettingsSectionCard(
-        title: 'Новый займ',
+        title: 'РќРѕРІС‹Р№ Р·Р°Р№Рј',
         child: Column(
           children: [
             TextField(
               controller: _principalController,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               decoration: const InputDecoration(
-                labelText: 'Сумма займа',
+                labelText: 'РЎСѓРјРјР° Р·Р°Р№РјР°',
                 prefixIcon: Icon(Icons.currency_ruble_outlined),
               ),
             ),
@@ -2003,7 +2208,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
               controller: _percentController,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               decoration: const InputDecoration(
-                labelText: 'Процент',
+                labelText: 'РџСЂРѕС†РµРЅС‚',
                 prefixIcon: Icon(Icons.percent_outlined),
               ),
             ),
@@ -2012,7 +2217,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
               controller: _penaltyController,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               decoration: const InputDecoration(
-                labelText: 'Пеня за день',
+                labelText: 'РџРµРЅСЏ Р·Р° РґРµРЅСЊ',
                 prefixIcon: Icon(Icons.warning_amber_rounded),
               ),
             ),
@@ -2021,7 +2226,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
               controller: _countController,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                labelText: 'Количество платежей',
+                labelText: 'РљРѕР»РёС‡РµСЃС‚РІРѕ РїР»Р°С‚РµР¶РµР№',
                 prefixIcon: Icon(Icons.timeline_outlined),
               ),
             ),
@@ -2033,7 +2238,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     controller: _intervalCountController,
                     keyboardType: TextInputType.number,
                     decoration: const InputDecoration(
-                      labelText: 'Каждые',
+                      labelText: 'РљР°Р¶РґС‹Рµ',
                       prefixIcon: Icon(Icons.swap_horiz_rounded),
                     ),
                   ),
@@ -2059,7 +2264,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                       });
                     },
                     decoration: const InputDecoration(
-                      labelText: 'Интервал',
+                      labelText: 'РРЅС‚РµСЂРІР°Р»',
                       prefixIcon: Icon(Icons.event_repeat_outlined),
                     ),
                   ),
@@ -2096,10 +2301,10 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   if (!mounted) {
                     return;
                   }
-                  showAppSnackBar('Значения по умолчанию сохранены');
+                  showAppSnackBar('Р—РЅР°С‡РµРЅРёСЏ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ СЃРѕС…СЂР°РЅРµРЅС‹');
                 },
                 icon: const Icon(Icons.save_outlined),
-                label: const Text('Сохранить значения по умолчанию'),
+                label: const Text('РЎРѕС…СЂР°РЅРёС‚СЊ Р·РЅР°С‡РµРЅРёСЏ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ'),
               ),
             ),
           ],
@@ -2107,21 +2312,21 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       ),
       const SizedBox(height: 16),
       _SettingsSectionCard(
-        title: 'Время',
+        title: 'Р’СЂРµРјСЏ',
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Сейчас используется: ${Formatters.dateTime(AppClock.now())}',
+              'РЎРµР№С‡Р°СЃ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ: ${Formatters.dateTime(AppClock.now())}',
               style: Theme.of(context).textTheme.bodyMedium,
             ),
             const SizedBox(height: 12),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               secondary: const Icon(Icons.schedule_outlined),
-              title: const Text('Тестовое время'),
+              title: const Text('РўРµСЃС‚РѕРІРѕРµ РІСЂРµРјСЏ'),
               subtitle: const Text(
-                'Нужно только для отладки начисления процентов, пени и просрочки',
+                'РќСѓР¶РЅРѕ С‚РѕР»СЊРєРѕ РґР»СЏ РѕС‚Р»Р°РґРєРё РЅР°С‡РёСЃР»РµРЅРёСЏ РїСЂРѕС†РµРЅС‚РѕРІ, РїРµРЅРё Рё РїСЂРѕСЃСЂРѕС‡РєРё',
               ),
               value: _debugTimeEnabled,
               onChanged: (value) async {
@@ -2148,8 +2353,8 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   icon: const Icon(Icons.edit_calendar_outlined),
                   label: Text(
                     _debugNow == null
-                        ? 'Выбрать тестовые дату и время'
-                        : 'Тестовое время: ${Formatters.dateTime(_debugNow!)}',
+                        ? 'Р’С‹Р±СЂР°С‚СЊ С‚РµСЃС‚РѕРІС‹Рµ РґР°С‚Сѓ Рё РІСЂРµРјСЏ'
+                        : 'РўРµСЃС‚РѕРІРѕРµ РІСЂРµРјСЏ: ${Formatters.dateTime(_debugNow!)}',
                   ),
                 ),
               ),
@@ -2159,12 +2364,12 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       ),
       const SizedBox(height: 16),
       _SettingsSectionCard(
-        title: 'Резервка',
+        title: 'Р РµР·РµСЂРІРєР°',
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Можно полностью выгрузить базу в файл и затем восстановить её обратно',
+              'РњРѕР¶РЅРѕ РїРѕР»РЅРѕСЃС‚СЊСЋ РІС‹РіСЂСѓР·РёС‚СЊ Р±Р°Р·Сѓ РІ С„Р°Р№Р» Рё Р·Р°С‚РµРј РІРѕСЃСЃС‚Р°РЅРѕРІРёС‚СЊ РµС‘ РѕР±СЂР°С‚РЅРѕ',
               style: Theme.of(context).textTheme.bodyMedium,
             ),
             const SizedBox(height: 12),
@@ -2173,7 +2378,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
               child: OutlinedButton.icon(
                 onPressed: _backupInProgress ? null : _exportBackup,
                 icon: const Icon(Icons.download_rounded),
-                label: const Text('Скачать резервную копию'),
+                label: const Text('РЎРєР°С‡Р°С‚СЊ СЂРµР·РµСЂРІРЅСѓСЋ РєРѕРїРёСЋ'),
               ),
             ),
             const SizedBox(height: 12),
@@ -2184,8 +2389,8 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 icon: const Icon(Icons.upload_file_rounded),
                 label: Text(
                   _backupInProgress
-                      ? 'Идёт операция...'
-                      : 'Загрузить и восстановить',
+                      ? 'РРґС‘С‚ РѕРїРµСЂР°С†РёСЏ...'
+                      : 'Р—Р°РіСЂСѓР·РёС‚СЊ Рё РІРѕСЃСЃС‚Р°РЅРѕРІРёС‚СЊ',
                 ),
               ),
             ),
@@ -2194,7 +2399,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       ),
       const SizedBox(height: 16),
       _SettingsSectionCard(
-        title: 'Опасные действия',
+        title: 'РћРїР°СЃРЅС‹Рµ РґРµР№СЃС‚РІРёСЏ',
         accent: const Color(0xFFFF8A80),
         child: SizedBox(
           width: double.infinity,
@@ -2204,7 +2409,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
               foregroundColor: const Color(0xFFFF8A80),
             ),
             icon: const Icon(Icons.delete_sweep_outlined),
-            label: const Text('Очистить всю базу, кроме профиля админа'),
+            label: const Text('РћС‡РёСЃС‚РёС‚СЊ РІСЃСЋ Р±Р°Р·Сѓ, РєСЂРѕРјРµ РїСЂРѕС„РёР»СЏ Р°РґРјРёРЅР°'),
           ),
         ),
       ),
@@ -2227,20 +2432,20 @@ class _SettingsSheetState extends State<_SettingsSheet> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                _isAdmin ? 'Настройки администратора' : 'Настройки клиента',
+                _isAdmin ? 'РќР°СЃС‚СЂРѕР№РєРё Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°' : 'РќР°СЃС‚СЂРѕР№РєРё РєР»РёРµРЅС‚Р°',
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: 10),
               Text(
                 _isAdmin
                     ? widget.user.name
-                    : 'Пользователь: ${widget.user.name}',
+                    : 'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ: ${widget.user.name}',
               ),
               const SizedBox(height: 16),
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.phone_outlined),
-                title: const Text('Телефон'),
+                title: const Text('РўРµР»РµС„РѕРЅ'),
                 subtitle: Text(Formatters.phone(widget.user.phone)),
               ),
               ..._buildCommonSettingsSectionsWithTelegram(context),
@@ -2252,9 +2457,9 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   secondary: const Icon(Icons.visibility_off_outlined),
-                  title: const Text('Скрыть выплаченные займы'),
+                  title: const Text('РЎРєСЂС‹С‚СЊ РІС‹РїР»Р°С‡РµРЅРЅС‹Рµ Р·Р°Р№РјС‹'),
                   subtitle: const Text(
-                    'В списке клиентов показывать только займы в процессе',
+                    'Р’ СЃРїРёСЃРєРµ РєР»РёРµРЅС‚РѕРІ РїРѕРєР°Р·С‹РІР°С‚СЊ С‚РѕР»СЊРєРѕ Р·Р°Р№РјС‹ РІ РїСЂРѕС†РµСЃСЃРµ',
                   ),
                   value: _hideClosedLoans,
                   onChanged: (value) async {
@@ -2270,16 +2475,16 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   secondary: const Icon(Icons.person_off_outlined),
-                  title: const Text('Скрыть клиентов без задолженности'),
+                  title: const Text('РЎРєСЂС‹С‚СЊ РєР»РёРµРЅС‚РѕРІ Р±РµР· Р·Р°РґРѕР»Р¶РµРЅРЅРѕСЃС‚Рё'),
                   subtitle: const Text(
-                    'Спрятать клиентов, у которых все займы выплачены',
+                    'РЎРїСЂСЏС‚Р°С‚СЊ РєР»РёРµРЅС‚РѕРІ, Сѓ РєРѕС‚РѕСЂС‹С… РІСЃРµ Р·Р°Р№РјС‹ РІС‹РїР»Р°С‡РµРЅС‹',
                   ),
                   value: false,
                   onChanged: null,
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'Значения по умолчанию для нового займа',
+                  'Р—РЅР°С‡РµРЅРёСЏ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ РґР»СЏ РЅРѕРІРѕРіРѕ Р·Р°Р№РјР°',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 12),
@@ -2289,7 +2494,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     decimal: true,
                   ),
                   decoration: const InputDecoration(
-                    labelText: 'Сумма займа',
+                    labelText: 'РЎСѓРјРјР° Р·Р°Р№РјР°',
                     prefixIcon: Icon(Icons.currency_ruble_outlined),
                   ),
                 ),
@@ -2300,7 +2505,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     decimal: true,
                   ),
                   decoration: const InputDecoration(
-                    labelText: 'Процент',
+                    labelText: 'РџСЂРѕС†РµРЅС‚',
                     prefixIcon: Icon(Icons.percent_outlined),
                   ),
                 ),
@@ -2311,7 +2516,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     decimal: true,
                   ),
                   decoration: const InputDecoration(
-                    labelText: 'Пеня за день',
+                    labelText: 'РџРµРЅСЏ Р·Р° РґРµРЅСЊ',
                     prefixIcon: Icon(Icons.warning_amber_rounded),
                   ),
                 ),
@@ -2320,7 +2525,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   controller: _countController,
                   keyboardType: TextInputType.number,
                   decoration: const InputDecoration(
-                    labelText: 'Количество платежей',
+                    labelText: 'РљРѕР»РёС‡РµСЃС‚РІРѕ РїР»Р°С‚РµР¶РµР№',
                     prefixIcon: Icon(Icons.timeline_outlined),
                   ),
                 ),
@@ -2332,7 +2537,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                         controller: _intervalCountController,
                         keyboardType: TextInputType.number,
                         decoration: const InputDecoration(
-                          labelText: 'Каждые',
+                          labelText: 'РљР°Р¶РґС‹Рµ',
                           prefixIcon: Icon(Icons.swap_horiz_rounded),
                         ),
                       ),
@@ -2358,7 +2563,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                           });
                         },
                         decoration: const InputDecoration(
-                          labelText: 'Интервал',
+                          labelText: 'РРЅС‚РµСЂРІР°Р»',
                           prefixIcon: Icon(Icons.event_repeat_outlined),
                         ),
                       ),
@@ -2393,28 +2598,28 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     if (!mounted) {
                       return;
                     }
-                    showAppSnackBar('Значения по умолчанию сохранены');
+                    showAppSnackBar('Р—РЅР°С‡РµРЅРёСЏ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ СЃРѕС…СЂР°РЅРµРЅС‹');
                   },
                   icon: const Icon(Icons.save_outlined),
-                  label: const Text('Сохранить значения по умолчанию'),
+                  label: const Text('РЎРѕС…СЂР°РЅРёС‚СЊ Р·РЅР°С‡РµРЅРёСЏ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ'),
                 ),
                 const SizedBox(height: 24),
                 Text(
-                  'Время расчётов',
+                  'Р’СЂРµРјСЏ СЂР°СЃС‡С‘С‚РѕРІ',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Сейчас используется: ${Formatters.dateTime(AppClock.now())}',
+                  'РЎРµР№С‡Р°СЃ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ: ${Formatters.dateTime(AppClock.now())}',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 12),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   secondary: const Icon(Icons.schedule_outlined),
-                  title: const Text('Тестовое время'),
+                  title: const Text('РўРµСЃС‚РѕРІРѕРµ РІСЂРµРјСЏ'),
                   subtitle: const Text(
-                    'Нужно только для отладки начисления процентов, пени и просрочки',
+                    'РќСѓР¶РЅРѕ С‚РѕР»СЊРєРѕ РґР»СЏ РѕС‚Р»Р°РґРєРё РЅР°С‡РёСЃР»РµРЅРёСЏ РїСЂРѕС†РµРЅС‚РѕРІ, РїРµРЅРё Рё РїСЂРѕСЃСЂРѕС‡РєРё',
                   ),
                   value: _debugTimeEnabled,
                   onChanged: (value) async {
@@ -2439,27 +2644,27 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     icon: const Icon(Icons.edit_calendar_outlined),
                     label: Text(
                       _debugNow == null
-                          ? 'Выбрать тестовые дату и время'
-                          : 'Тестовое время: ${Formatters.dateTime(_debugNow!)}',
+                          ? 'Р’С‹Р±СЂР°С‚СЊ С‚РµСЃС‚РѕРІС‹Рµ РґР°С‚Сѓ Рё РІСЂРµРјСЏ'
+                          : 'РўРµСЃС‚РѕРІРѕРµ РІСЂРµРјСЏ: ${Formatters.dateTime(_debugNow!)}',
                     ),
                   ),
                   const SizedBox(height: 12),
                 ],
                 const SizedBox(height: 12),
                 Text(
-                  'Резервная копия',
+                  'Р РµР·РµСЂРІРЅР°СЏ РєРѕРїРёСЏ',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Можно полностью выгрузить базу в файл и затем восстановить её обратно',
+                  'РњРѕР¶РЅРѕ РїРѕР»РЅРѕСЃС‚СЊСЋ РІС‹РіСЂСѓР·РёС‚СЊ Р±Р°Р·Сѓ РІ С„Р°Р№Р» Рё Р·Р°С‚РµРј РІРѕСЃСЃС‚Р°РЅРѕРІРёС‚СЊ РµС‘ РѕР±СЂР°С‚РЅРѕ',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
                   onPressed: _backupInProgress ? null : _exportBackup,
                   icon: const Icon(Icons.download_rounded),
-                  label: const Text('Скачать резервную копию'),
+                  label: const Text('РЎРєР°С‡Р°С‚СЊ СЂРµР·РµСЂРІРЅСѓСЋ РєРѕРїРёСЋ'),
                 ),
                 const SizedBox(height: 12),
                 FilledButton.icon(
@@ -2467,8 +2672,8 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   icon: const Icon(Icons.upload_file_rounded),
                   label: Text(
                     _backupInProgress
-                        ? 'Идёт операция...'
-                        : 'Загрузить и восстановить',
+                        ? 'РРґС‘С‚ РѕРїРµСЂР°С†РёСЏ...'
+                        : 'Р—Р°РіСЂСѓР·РёС‚СЊ Рё РІРѕСЃСЃС‚Р°РЅРѕРІРёС‚СЊ',
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -2478,7 +2683,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     foregroundColor: const Color(0xFFFF8A80),
                   ),
                   icon: const Icon(Icons.delete_sweep_outlined),
-                  label: const Text('Очистить всю базу, кроме профиля админа'),
+                  label: const Text('РћС‡РёСЃС‚РёС‚СЊ РІСЃСЋ Р±Р°Р·Сѓ, РєСЂРѕРјРµ РїСЂРѕС„РёР»СЏ Р°РґРјРёРЅР°'),
                 ),
               ],
             ],
@@ -2525,9 +2730,9 @@ class _SettingsSectionCard extends StatelessWidget {
 }
 
 enum _SettingsIntervalUnit {
-  days('Дней', 'days'),
-  weeks('Недель', 'weeks'),
-  months('Месяцев', 'months');
+  days('Р”РЅРµР№', 'days'),
+  weeks('РќРµРґРµР»СЊ', 'weeks'),
+  months('РњРµСЃСЏС†РµРІ', 'months');
 
   const _SettingsIntervalUnit(this.label, this.storageValue);
 

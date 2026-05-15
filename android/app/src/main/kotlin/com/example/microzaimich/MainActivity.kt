@@ -75,7 +75,7 @@ class MainActivity : FlutterActivity() {
                         val forAdmin = call.argument<Boolean>("forAdmin") ?: false
                         val prefs = getSharedPreferences(servicePrefsName, Context.MODE_PRIVATE)
                         val prefix = if (forAdmin) "admin" else "client"
-                        val defaultHour = if (forAdmin) 18 else 10
+                        val defaultHour = 18
                         result.success(
                             mapOf(
                                 "hour" to prefs.getInt("${prefix}_reminder_hour", defaultHour),
@@ -86,7 +86,7 @@ class MainActivity : FlutterActivity() {
 
                     "setReminderTime" -> {
                         val forAdmin = call.argument<Boolean>("forAdmin") ?: false
-                        val hour = (call.argument<Int>("hour") ?: if (forAdmin) 18 else 10)
+                        val hour = (call.argument<Int>("hour") ?: 18)
                             .coerceIn(0, 23)
                         val minute = (call.argument<Int>("minute") ?: 0).coerceIn(0, 59)
                         val prefs = getSharedPreferences(servicePrefsName, Context.MODE_PRIVATE)

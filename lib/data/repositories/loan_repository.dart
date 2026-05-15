@@ -258,13 +258,13 @@ class LoanRepository {
         return;
       }
 
-      final paymentDate = newlyPaidItems.last.paidAt;
+      final paidItem = newlyPaidItems.last;
       await _notificationRepository.notifyUser(
         userId: loan.userId,
         title: 'Платёж отмечен как оплаченный',
         body:
             'Администратор отметил оплату по займу ${loan.displayTitle}'
-            '${paymentDate == null ? '' : ' от ${Formatters.date(paymentDate)}'}.',
+            ' со сроком ${Formatters.date(paidItem.dueDate)}.',
         type: AppNotificationType.paymentApproved,
       );
       return;
@@ -306,13 +306,13 @@ class LoanRepository {
       return;
     }
 
-    final paymentDate = newlyPaidItems.last.paidAt;
+    final paidItem = newlyPaidItems.last;
     await _notificationRepository.notifyUser(
       userId: loan.userId,
       title: 'Платёж отмечен как оплаченный',
       body:
           'Администратор отметил оплату по займу ${loan.displayTitle}'
-          '${paymentDate == null ? '' : ' от ${Formatters.date(paymentDate)}'}.',
+          ' со сроком ${Formatters.date(paidItem.dueDate)}.',
       type: AppNotificationType.paymentApproved,
     );
   }
