@@ -160,6 +160,7 @@ class _ClientHomeState extends State<_ClientHome> {
   late final Stream<List<Loan>> _loansStream;
   late final Stream<PaymentSettings> _paymentSettingsStream;
   late final Stream<List<AppNotification>> _notificationsStream;
+  Timer? _webInstallBannerPoller;
   bool _showTelegramWebBanner = false;
   bool _telegramWebBannerLoaded = false;
   bool _showWebInstallBanner = false;
@@ -240,10 +241,33 @@ class _ClientHomeState extends State<_ClientHome> {
     if (!mounted) {
       return;
     }
+    _webInstallBannerPoller?.cancel();
     setState(() {
       _webInstallBannerLoaded = true;
-      _showWebInstallBanner = !dismissed && !WebInstallPrompt.isStandalone;
+      _showWebInstallBanner =
+          !dismissed &&
+          !WebInstallPrompt.isStandalone &&
+          (WebInstallPrompt.isIos || WebInstallPrompt.canPrompt);
     });
+    if (!dismissed &&
+        !WebInstallPrompt.isStandalone &&
+        !WebInstallPrompt.isIos &&
+        !WebInstallPrompt.canPrompt) {
+      _webInstallBannerPoller = Timer.periodic(const Duration(milliseconds: 500), (
+        timer,
+      ) {
+        if (!mounted) {
+          timer.cancel();
+          return;
+        }
+        if (WebInstallPrompt.canPrompt) {
+          timer.cancel();
+          setState(() {
+            _showWebInstallBanner = true;
+          });
+        }
+      });
+    }
   }
 
   Future<void> _dismissTelegramWebBanner() async {
@@ -258,6 +282,7 @@ class _ClientHomeState extends State<_ClientHome> {
   }
 
   Future<void> _dismissWebInstallBanner() async {
+    _webInstallBannerPoller?.cancel();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_webInstallBannerKey, true);
     if (!mounted) {
@@ -278,6 +303,12 @@ class _ClientHomeState extends State<_ClientHome> {
       return;
     }
     await _showWebInstallHelpDialog(context);
+  }
+
+  @override
+  void dispose() {
+    _webInstallBannerPoller?.cancel();
+    super.dispose();
   }
 
   @override
@@ -427,6 +458,7 @@ class _AdminHome extends StatefulWidget {
 }
 
 class _AdminHomeState extends State<_AdminHome> {
+  Timer? _webInstallBannerPoller;
   bool _hideClosedLoans = false;
   late final Stream<List<AppUser>> _clientsStream;
   late final Stream<List<Loan>> _allLoansStream;
@@ -515,13 +547,37 @@ class _AdminHomeState extends State<_AdminHome> {
     if (!mounted) {
       return;
     }
+    _webInstallBannerPoller?.cancel();
     setState(() {
       _webInstallBannerLoaded = true;
-      _showWebInstallBanner = !dismissed && !WebInstallPrompt.isStandalone;
+      _showWebInstallBanner =
+          !dismissed &&
+          !WebInstallPrompt.isStandalone &&
+          (WebInstallPrompt.isIos || WebInstallPrompt.canPrompt);
     });
+    if (!dismissed &&
+        !WebInstallPrompt.isStandalone &&
+        !WebInstallPrompt.isIos &&
+        !WebInstallPrompt.canPrompt) {
+      _webInstallBannerPoller = Timer.periodic(const Duration(milliseconds: 500), (
+        timer,
+      ) {
+        if (!mounted) {
+          timer.cancel();
+          return;
+        }
+        if (WebInstallPrompt.canPrompt) {
+          timer.cancel();
+          setState(() {
+            _showWebInstallBanner = true;
+          });
+        }
+      });
+    }
   }
 
   Future<void> _dismissWebInstallBanner() async {
+    _webInstallBannerPoller?.cancel();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_webInstallBannerKey, true);
     if (!mounted) {
@@ -542,6 +598,12 @@ class _AdminHomeState extends State<_AdminHome> {
       return;
     }
     await _showWebInstallHelpDialog(context);
+  }
+
+  @override
+  void dispose() {
+    _webInstallBannerPoller?.cancel();
+    super.dispose();
   }
 
   Future<void> _openLoanEditor(
