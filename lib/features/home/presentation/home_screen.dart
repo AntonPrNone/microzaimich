@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -114,6 +114,11 @@ class _ClientHomeState extends State<_ClientHome> {
   late final Stream<List<Loan>> _loansStream;
   late final Stream<PaymentSettings> _paymentSettingsStream;
   late final Stream<List<AppNotification>> _notificationsStream;
+  bool _showTelegramWebBanner = false;
+  bool _telegramWebBannerLoaded = false;
+
+  String get _telegramWebBannerKey =>
+      'client_web_tg_banner_dismissed_${widget.currentUser.id}';
 
   @override
   void initState() {
@@ -123,6 +128,57 @@ class _ClientHomeState extends State<_ClientHome> {
     _notificationsStream = widget.notificationRepository.watchForUser(
       widget.currentUser.id,
     );
+    _loadTelegramWebBannerState();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ClientHome oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentUser.id != widget.currentUser.id ||
+        oldWidget.currentUser.telegramChatId != widget.currentUser.telegramChatId ||
+        oldWidget.currentUser.telegramNotificationsEnabled !=
+            widget.currentUser.telegramNotificationsEnabled) {
+      _loadTelegramWebBannerState();
+    }
+  }
+
+  bool get _hasTelegramNotificationsConfigured =>
+      widget.currentUser.hasTelegramLinked &&
+      widget.currentUser.telegramNotificationsEnabled;
+
+  Future<void> _loadTelegramWebBannerState() async {
+    if (!AppPlatform.isWeb) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _telegramWebBannerLoaded = true;
+        _showTelegramWebBanner = false;
+      });
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final dismissed = prefs.getBool(_telegramWebBannerKey) ?? false;
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _telegramWebBannerLoaded = true;
+      _showTelegramWebBanner =
+          !dismissed && !_hasTelegramNotificationsConfigured;
+    });
+  }
+
+  Future<void> _dismissTelegramWebBanner() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_telegramWebBannerKey, true);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _showTelegramWebBanner = false;
+    });
   }
 
   @override
@@ -197,10 +253,29 @@ class _ClientHomeState extends State<_ClientHome> {
                   ),
                   body: Stack(
                     children: [
-                      ClientDashboard(
-                        user: widget.currentUser,
-                        loans: loans,
-                        paymentSettings: settingsSnapshot.data!,
+                      Column(
+                        children: [
+                          if (_telegramWebBannerLoaded && _showTelegramWebBanner)
+                            MaterialBanner(
+                              content: const Text(
+                                'В веб-версии настоятельно рекомендуется включить уведомления через Telegram-бота в настройках профиля.',
+                              ),
+                              leading: const Icon(Icons.telegram_rounded),
+                              actions: [
+                                TextButton(
+                                  onPressed: _dismissTelegramWebBanner,
+                                  child: const Text('Понятно'),
+                                ),
+                              ],
+                            ),
+                          Expanded(
+                            child: ClientDashboard(
+                              user: widget.currentUser,
+                              loans: loans,
+                              paymentSettings: settingsSnapshot.data!,
+                            ),
+                          ),
+                        ],
                       ),
                       _NotificationEffects(
                         user: widget.currentUser,
@@ -1136,10 +1211,23 @@ class _SettingsSheetState extends State<_SettingsSheet> {
   late bool _debugTimeEnabled;
   late TimeOfDay _adminReminderTime;
   late TimeOfDay _clientReminderTime;
+  late String? _telegramChatId;
+  late String? _telegramUsername;
+  late String? _telegramLinkCode;
+  late DateTime? _telegramLinkedAt;
+  late bool _telegramNotificationsEnabled;
+  StreamSubscription<AppUser?>? _userSubscription;
   DateTime? _debugNow;
   bool _backupInProgress = false;
 
   bool get _isAdmin => widget.user.isAdmin;
+  AppUser get _telegramUserState => widget.user.copyWith(
+        telegramChatId: _telegramChatId,
+        telegramUsername: _telegramUsername,
+        telegramLinkCode: _telegramLinkCode,
+        telegramLinkedAt: _telegramLinkedAt,
+        telegramNotificationsEnabled: _telegramNotificationsEnabled,
+      );
 
   @override
   void initState() {
@@ -1171,14 +1259,38 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       hour: widget.user.reminderHour,
       minute: widget.user.reminderMinute,
     );
+    _telegramChatId = widget.user.telegramChatId;
+    _telegramUsername = widget.user.telegramUsername;
+    _telegramLinkCode = widget.user.telegramLinkCode;
+    _telegramLinkedAt = widget.user.telegramLinkedAt;
+    _telegramNotificationsEnabled = widget.user.telegramNotificationsEnabled;
     _debugTimeEnabled = widget.clockSettings.debugEnabled;
     _debugNow = widget.clockSettings.debugNow == null
         ? null
         : AppClock.toMoscow(widget.clockSettings.debugNow!);
+    _userSubscription = context.read<AuthRepository>().watchUserById(widget.user.id).listen((
+      user,
+    ) {
+      if (!mounted || user == null) {
+        return;
+      }
+      setState(() {
+        _telegramChatId = user.telegramChatId;
+        _telegramUsername = user.telegramUsername;
+        _telegramLinkCode = user.telegramLinkCode;
+        _telegramLinkedAt = user.telegramLinkedAt;
+        _telegramNotificationsEnabled = user.telegramNotificationsEnabled;
+        _clientReminderTime = TimeOfDay(
+          hour: user.reminderHour,
+          minute: user.reminderMinute,
+        );
+      });
+    });
   }
 
   @override
   void dispose() {
+    _userSubscription?.cancel();
     _principalController.dispose();
     _percentController.dispose();
     _penaltyController.dispose();
@@ -1523,6 +1635,100 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     }
   }
 
+  Future<void> _refreshTelegramLinkCode() async {
+    try {
+      final updated = await context.read<AuthRepository>().refreshTelegramLinkCode(
+        user: _telegramUserState,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _telegramLinkCode = updated.telegramLinkCode;
+      });
+      showAppSnackBar('Код привязки Telegram обновлён');
+    } on Object catch (error) {
+      showAppSnackBar('Не удалось обновить код Telegram: $error');
+    }
+  }
+
+  Future<void> _refreshTelegramLinkCodeAndSync() async {
+    final previousCode = _telegramLinkCode;
+    await _refreshTelegramLinkCode();
+    if (!mounted) {
+      return;
+    }
+    if ((_telegramLinkCode ?? '').isEmpty || _telegramLinkCode == previousCode) {
+      return;
+    }
+    await _copyTelegramCommand();
+    if (!mounted) {
+      return;
+    }
+  }
+
+  Future<void> _copyTelegramCommand() async {
+    final code = _telegramLinkCode;
+    if (code == null || code.isEmpty) {
+      showAppSnackBar('Сначала создайте код привязки Telegram');
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: '/start $code'));
+    showAppSnackBar('Команда /start скопирована');
+  }
+
+
+  Future<void> _toggleTelegramNotifications(bool enabled) async {
+    if ((_telegramChatId ?? '').isEmpty) {
+      showAppSnackBar('Сначала привяжите Telegram к профилю');
+      return;
+    }
+    try {
+      final updated = await context
+          .read<AuthRepository>()
+          .updateTelegramNotifications(
+            user: _telegramUserState,
+            enabled: enabled,
+          );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _telegramNotificationsEnabled = updated.telegramNotificationsEnabled;
+      });
+      showAppSnackBar(
+        enabled
+            ? 'Уведомления в Telegram включены'
+            : 'Уведомления в Telegram отключены',
+      );
+    } on Object catch (error) {
+      showAppSnackBar('Не удалось обновить Telegram-настройки: $error');
+    }
+  }
+
+  Future<void> _disconnectTelegram() async {
+    if ((_telegramChatId ?? '').isEmpty) {
+      return;
+    }
+    try {
+      final updated = await context.read<AuthRepository>().disconnectTelegram(
+        user: _telegramUserState,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _telegramChatId = updated.telegramChatId;
+        _telegramUsername = updated.telegramUsername;
+        _telegramLinkedAt = updated.telegramLinkedAt;
+        _telegramNotificationsEnabled = updated.telegramNotificationsEnabled;
+      });
+      showAppSnackBar('Telegram отвязан от профиля');
+    } on Object catch (error) {
+      showAppSnackBar('Не удалось отвязать Telegram: $error');
+    }
+  }
+
   Future<void> _clearDatabase() async {
     if (widget.onClearDatabase == null || _backupInProgress) {
       return;
@@ -1668,6 +1874,93 @@ class _SettingsSheetState extends State<_SettingsSheet> {
         ),
       ),
     ];
+  }
+
+  List<Widget> _buildCommonSettingsSectionsWithTelegram(BuildContext context) {
+    final sections = List<Widget>.of(_buildCommonSettingsSections(context));
+    if (sections.isNotEmpty) {
+      sections.insertAll(sections.length - 2, [
+        const SizedBox(height: 16),
+        _SettingsSectionCard(
+          title: 'Telegram',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                (_telegramChatId ?? '').isNotEmpty
+                    ? 'Telegram уже привязан к этому профилю.'
+                    : 'Создайте код и отправьте боту команду /start с этим кодом.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 12),
+              if ((_telegramLinkCode ?? '').isNotEmpty)
+                SelectableText(
+                  'Код: $_telegramLinkCode',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              if ((_telegramChatId ?? '').isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  _telegramUsername?.isNotEmpty == true
+                      ? 'Подключён аккаунт: @$_telegramUsername'
+                      : 'Подключён Telegram-чат: $_telegramChatId',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                if (_telegramLinkedAt != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Привязано: ${Formatters.dateTime(_telegramLinkedAt!)}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ],
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _refreshTelegramLinkCodeAndSync,
+                  icon: const Icon(Icons.password_rounded),
+                  label: Text(
+                    (_telegramLinkCode ?? '').isEmpty
+                        ? 'Создать код привязки'
+                        : 'Обновить код привязки',
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 12),
+              Text(
+                'После создания или обновления кода команда /start копируется автоматически. Статус Telegram обновляется сам по live-данным профиля.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              if ((_telegramChatId ?? '').isNotEmpty) ...[
+                const SizedBox(height: 12),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  secondary: const Icon(Icons.send_rounded),
+                  title: const Text('Уведомления в Telegram'),
+                  subtitle: const Text(
+                    'Отправлять новые уведомления в подключённый Telegram-чат',
+                  ),
+                  value: _telegramNotificationsEnabled,
+                  onChanged: _toggleTelegramNotifications,
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _disconnectTelegram,
+                    icon: const Icon(Icons.link_off_rounded),
+                    label: const Text('Отвязать Telegram'),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ]);
+    }
+    return sections;
   }
 
   List<Widget> _buildAdminSettingsSections(BuildContext context) {
@@ -1950,7 +2243,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 title: const Text('Телефон'),
                 subtitle: Text(Formatters.phone(widget.user.phone)),
               ),
-              ..._buildCommonSettingsSections(context),
+              ..._buildCommonSettingsSectionsWithTelegram(context),
               if (_isAdmin) ...[
                 const SizedBox(height: 16),
                 ..._buildAdminSettingsSections(context),

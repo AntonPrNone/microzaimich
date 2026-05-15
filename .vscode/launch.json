@@ -18,7 +18,7 @@
       "deviceId": "emulator-5554",
       "preLaunchTask": "flutter: build x86_64 debug apk",
       "toolArgs": [
-        "--use-application-binary=build/app/outputs/flutter-apk/app-x86_64-debug.apk"
+        "--use-application-binary=C:/temp/microzaimich_vscode/app-x86_64-debug.apk"
       ]
     }
   ]

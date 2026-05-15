@@ -4,12 +4,13 @@
     {
       "label": "flutter: build x86_64 debug apk",
       "type": "shell",
-      "command": "flutter",
+      "command": "powershell",
       "args": [
-        "build",
-        "apk",
-        "--debug",
-        "--split-per-abi"
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\.vscode\\build_x86_debug.ps1"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

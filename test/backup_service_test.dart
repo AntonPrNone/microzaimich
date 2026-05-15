@@ -34,6 +34,7 @@ void main() {
         password: '1234',
         reminderHour: 10,
         reminderMinute: 0,
+        telegramNotificationsEnabled: false,
         createdAt: DateTime.utc(2026, 1, 1, 12),
       );
       await fake.collection('users').doc(user.id).set(user.toMap());

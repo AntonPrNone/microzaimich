@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -26,6 +27,7 @@ class AuthRepository {
   }) : _firestoreService = firestoreService;
 
   final FirestoreService _firestoreService;
+  final Random _random = Random.secure();
 
   String normalizePhone(String phone) {
     final digits = phone.replaceAll(RegExp(r'\D'), '');
@@ -193,8 +195,9 @@ class AuthRepository {
           'phone': normalizedPhone,
           'role': role.value,
           'password': password,
-          'reminderHour': 10,
+          'reminderHour': 18,
           'reminderMinute': 0,
+          'telegramNotificationsEnabled': false,
           'createdAt': Timestamp.fromDate(AppClock.nowForStorage()),
         },
       );
@@ -208,8 +211,9 @@ class AuthRepository {
       phone: normalizedPhone,
       role: role,
       password: password,
-      reminderHour: 10,
+      reminderHour: 18,
       reminderMinute: 0,
+      telegramNotificationsEnabled: false,
       createdAt: AppClock.nowForStorage(),
     );
     await userRef.set(user.toMap());
@@ -299,6 +303,109 @@ class AuthRepository {
       'reminderMinute': updated.reminderMinute,
     });
     return updated;
+  }
+
+  Future<AppUser> refreshTelegramLinkCode({
+    required AppUser user,
+  }) async {
+    String code;
+    do {
+      code = _generateTelegramLinkCode();
+    } while (await _telegramLinkCodeExists(code));
+
+    final updated = user.copyWith(telegramLinkCode: code);
+    const field = 'telegramLinkCode';
+
+    if (AppPlatform.isWindows) {
+      await _firestoreService.windowsStream!.updateDocument('users/${user.id}', {
+        field: code,
+      });
+      return updated;
+    }
+
+    await _firestoreService.users.doc(user.id).update({field: code});
+    return updated;
+  }
+
+  Future<AppUser> updateTelegramNotifications({
+    required AppUser user,
+    required bool enabled,
+  }) async {
+    final updated = user.copyWith(telegramNotificationsEnabled: enabled);
+    const field = 'telegramNotificationsEnabled';
+
+    if (AppPlatform.isWindows) {
+      await _firestoreService.windowsStream!.updateDocument('users/${user.id}', {
+        field: enabled,
+      });
+      return updated;
+    }
+
+    await _firestoreService.users.doc(user.id).update({field: enabled});
+    return updated;
+  }
+
+  Future<AppUser> disconnectTelegram({
+    required AppUser user,
+  }) async {
+    final updated = AppUser(
+      id: user.id,
+      name: user.name,
+      phone: user.phone,
+      role: user.role,
+      password: user.password,
+      reminderHour: user.reminderHour,
+      reminderMinute: user.reminderMinute,
+      telegramChatId: '',
+      telegramUsername: '',
+      telegramLinkCode: user.telegramLinkCode,
+      telegramLinkedAt: null,
+      telegramNotificationsEnabled: false,
+      createdAt: user.createdAt,
+    );
+    final payload = {
+      'telegramChatId': null,
+      'telegramUsername': null,
+      'telegramLinkedAt': null,
+      'telegramNotificationsEnabled': false,
+    };
+
+    if (AppPlatform.isWindows) {
+      await _firestoreService.windowsStream!.updateDocument(
+        'users/${user.id}',
+        payload,
+      );
+      return updated;
+    }
+
+    await _firestoreService.users.doc(user.id).update(payload);
+    return updated;
+  }
+
+  String _generateTelegramLinkCode() {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    return List.generate(
+      8,
+      (_) => alphabet[_random.nextInt(alphabet.length)],
+    ).join();
+  }
+
+  Future<bool> _telegramLinkCodeExists(String code) async {
+    if (AppPlatform.isWindows) {
+      final docs = await _firestoreService.windowsStream!.queryDocuments(
+        'users',
+        whereField: 'telegramLinkCode',
+        isEqualTo: code,
+        limit: 1,
+      );
+      return docs.isNotEmpty;
+    }
+
+    final snapshot = await _firestoreService.users
+        .where('telegramLinkCode', isEqualTo: code)
+        .limit(1)
+        .get();
+    return snapshot.docs.isNotEmpty;
   }
 }
 
