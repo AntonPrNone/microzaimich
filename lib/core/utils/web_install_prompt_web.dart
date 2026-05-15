@@ -28,9 +28,14 @@ class WebInstallPrompt {
     }
     _initialized = true;
 
-    html.window.on['beforeinstallprompt'].listen((event) {
-      event.preventDefault();
-      _deferredPrompt = event;
+    html.window.addEventListener('beforeinstallprompt', (event) {
+      final promptEvent = event as dynamic;
+      promptEvent.preventDefault();
+      _deferredPrompt = promptEvent;
+    });
+
+    html.window.addEventListener('appinstalled', (_) {
+      _deferredPrompt = null;
     });
   }
 
