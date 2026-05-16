@@ -27,6 +27,12 @@ class BackupService {
             _firestoreService.appSettings,
             excludeIds: const {'clock'},
           );
+    final telegramDeliveries = AppPlatform.isWindows
+        ? await _readWindowsCollection('telegram_deliveries')
+        : await _readCollection(_firestoreService.telegramDeliveries);
+    final serviceState = AppPlatform.isWindows
+        ? await _readWindowsCollection('_service_state')
+        : await _readCollection(_firestoreService.serviceState);
 
     final payload = <String, dynamic>{
       'meta': {
@@ -39,6 +45,8 @@ class BackupService {
         'loans': loans,
         'notifications': notifications,
         'app_settings': appSettings,
+        'telegram_deliveries': telegramDeliveries,
+        '_service_state': serviceState,
       },
     };
 
@@ -62,12 +70,16 @@ class BackupService {
     final appSettings = _parseDocuments(collections['app_settings'])
         .where((document) => document.id != 'clock')
         .toList();
+    final telegramDeliveries = _parseDocuments(collections['telegram_deliveries']);
+    final serviceState = _parseDocuments(collections['_service_state']);
 
     if (AppPlatform.isWindows) {
       await _replaceWindowsCollection('users', users);
       await _replaceWindowsCollection('loans', loans);
       await _replaceWindowsCollection('notifications', notifications);
       await _replaceWindowsCollection('app_settings', appSettings);
+      await _replaceWindowsCollection('telegram_deliveries', telegramDeliveries);
+      await _replaceWindowsCollection('_service_state', serviceState);
       return;
     }
 
@@ -75,6 +87,11 @@ class BackupService {
     await _replaceCollection(_firestoreService.loans, loans);
     await _replaceCollection(_firestoreService.notifications, notifications);
     await _replaceCollection(_firestoreService.appSettings, appSettings);
+    await _replaceCollection(
+      _firestoreService.telegramDeliveries,
+      telegramDeliveries,
+    );
+    await _replaceCollection(_firestoreService.serviceState, serviceState);
   }
 
   Future<void> clearAllPreservingAdmin(String adminUserId) async {
@@ -82,6 +99,8 @@ class BackupService {
       await _clearWindowsCollection('loans');
       await _clearWindowsCollection('notifications');
       await _clearWindowsCollection('app_settings');
+      await _clearWindowsCollection('telegram_deliveries');
+      await _clearWindowsCollection('_service_state');
 
       final users = await _firestoreService.windowsStream!.listDocuments('users');
       for (final doc in users) {
@@ -96,6 +115,8 @@ class BackupService {
     await _clearCollection(_firestoreService.loans);
     await _clearCollection(_firestoreService.notifications);
     await _clearCollection(_firestoreService.appSettings);
+    await _clearCollection(_firestoreService.telegramDeliveries);
+    await _clearCollection(_firestoreService.serviceState);
 
     final usersSnapshot = await _firestoreService.users.get();
     final firestore = _firestoreService.users.firestore;

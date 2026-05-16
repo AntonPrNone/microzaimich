@@ -122,6 +122,18 @@ void main() {
         'debugEnabled': true,
         'debugNow': Timestamp.fromDate(DateTime.utc(2026, 5, 1, 12)),
       });
+      await fake.collection('telegram_deliveries').doc('notification-1').set({
+        'notificationId': notification.id,
+        'userId': user.id,
+        'type': notification.type.name,
+        'attemptedAt': Timestamp.fromDate(DateTime.utc(2026, 2, 8, 10, 1)),
+        'sentAt': Timestamp.fromDate(DateTime.utc(2026, 2, 8, 10, 2)),
+        'title': notification.title,
+      });
+      await fake.collection('_service_state').doc('telegram_worker').set({
+        'lastProcessedAt': Timestamp.fromDate(DateTime.utc(2026, 2, 8, 10)),
+        'updatedAt': Timestamp.fromDate(DateTime.utc(2026, 2, 8, 10, 3)),
+      });
 
       final jsonString = await service.exportBackupJson();
       final decoded = jsonDecode(jsonString) as Map<String, dynamic>;
@@ -132,6 +144,8 @@ void main() {
         'loans',
         'notifications',
         'app_settings',
+        'telegram_deliveries',
+        '_service_state',
       });
 
       final appSettingsDocs = collections['app_settings'] as List<dynamic>;
@@ -146,6 +160,18 @@ void main() {
       expect(exportedLoanData['paymentIntervalUnit'], 'months');
       expect(exportedLoanData['note'], 'Архивный тест');
       expect((exportedLoanData['schedule'] as List).length, 2);
+
+      final exportedDeliveryDoc =
+          (collections['telegram_deliveries'] as List<dynamic>).single
+              as Map<String, dynamic>;
+      final exportedDeliveryData =
+          exportedDeliveryDoc['data'] as Map<String, dynamic>;
+      expect(exportedDeliveryData['notificationId'], notification.id);
+
+      final exportedStateDoc =
+          (collections['_service_state'] as List<dynamic>).single
+              as Map<String, dynamic>;
+      expect(exportedStateDoc['id'], 'telegram_worker');
     });
 
     test('imports backup back into current collections with current fields', () async {
@@ -214,6 +240,18 @@ void main() {
         'paymentIntervalUnit': 'months',
         'updatedAt': Timestamp.fromDate(DateTime.utc(2026, 2, 1, 9)),
       });
+      await sourceDb.collection('telegram_deliveries').doc('notification-1').set({
+        'notificationId': 'notification-1',
+        'userId': 'user-1',
+        'type': 'paymentApproved',
+        'attemptedAt': Timestamp.fromDate(DateTime.utc(2026, 2, 1, 10, 1)),
+        'sentAt': Timestamp.fromDate(DateTime.utc(2026, 2, 1, 10, 2)),
+        'title': 'Платёж отмечен',
+      });
+      await sourceDb.collection('_service_state').doc('telegram_worker').set({
+        'lastProcessedAt': Timestamp.fromDate(DateTime.utc(2026, 2, 1, 10)),
+        'updatedAt': Timestamp.fromDate(DateTime.utc(2026, 2, 1, 10, 3)),
+      });
 
       final backupJson = await sourceService.exportBackupJson();
 
@@ -232,6 +270,13 @@ void main() {
       await targetDb.collection('app_settings').doc('clock').set({
         'debugEnabled': true,
       });
+      await targetDb.collection('telegram_deliveries').doc('stale-delivery').set({
+        'notificationId': 'stale-notification',
+        'userId': 'stale-user',
+      });
+      await targetDb.collection('_service_state').doc('stale_state').set({
+        'updatedAt': Timestamp.fromDate(DateTime.utc(2025, 1, 1)),
+      });
 
       await targetService.importBackupJson(backupJson);
 
@@ -241,16 +286,27 @@ void main() {
       final paymentDoc = await targetDb.collection('app_settings').doc('payment').get();
       final defaultsDoc = await targetDb.collection('app_settings').doc('loan_defaults').get();
       final clockDoc = await targetDb.collection('app_settings').doc('clock').get();
+      final telegramDeliveries = await targetDb.collection('telegram_deliveries').get();
+      final workerState = await targetDb.collection('_service_state').get();
 
       expect(users.docs.map((doc) => doc.id).toList(), ['user-1']);
       expect(loans.docs.map((doc) => doc.id).toList(), ['loan-1']);
       expect(notifications.docs.map((doc) => doc.id).toList(), ['notification-1']);
+      expect(
+        telegramDeliveries.docs.map((doc) => doc.id).toList(),
+        ['notification-1'],
+      );
+      expect(workerState.docs.map((doc) => doc.id).toList(), ['telegram_worker']);
 
       final importedLoan = loans.docs.single.data();
       expect(importedLoan['paymentIntervalCount'], 1);
       expect(importedLoan['paymentIntervalUnit'], 'months');
       expect(importedLoan['note'], 'Тест импорта');
       expect((importedLoan['schedule'] as List).single['id'], 'payment-1');
+      final importedDelivery = telegramDeliveries.docs.single.data();
+      expect(importedDelivery['notificationId'], 'notification-1');
+      final importedState = workerState.docs.single.data();
+      expect(importedState['lastProcessedAt'], isA<Timestamp>());
 
       expect(paymentDoc.exists, isTrue);
       expect(defaultsDoc.exists, isTrue);

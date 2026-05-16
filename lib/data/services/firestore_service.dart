@@ -24,4 +24,10 @@ class FirestoreService {
   CollectionReference<Map<String, dynamic>> get appSettings =>
       _db.collection('app_settings');
 
+  CollectionReference<Map<String, dynamic>> get telegramDeliveries =>
+      _db.collection('telegram_deliveries');
+
+  CollectionReference<Map<String, dynamic>> get serviceState =>
+      _db.collection('_service_state');
+
 }
